@@ -26,7 +26,25 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
+    public String generateToken(UserPrincipal userPrincipal) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + jwtConfig.getExpirationMs());
+
+        return Jwts.builder()
+                .subject(userPrincipal.getUsername())
+                .claim("userId", userPrincipal.getId())
+                .claim("role", userPrincipal.getRole())
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
     public String generateToken(UserDetails userDetails) {
+        if (userDetails instanceof UserPrincipal userPrincipal) {
+            return generateToken(userPrincipal);
+        }
+
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtConfig.getExpirationMs());
 
@@ -38,14 +56,28 @@ public class JwtTokenProvider {
                 .compact();
     }
 
-    public String getUsernameFromToken(String token) {
-        Claims claims = Jwts.parser()
+    public Claims getClaims(String token) {
+        return Jwts.parser()
                 .verifyWith(getSigningKey())
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
 
-        return claims.getSubject();
+    public String getUsernameFromToken(String token) {
+        return getClaims(token).getSubject();
+    }
+
+    public Long getUserIdFromToken(String token) {
+        Object userIdObj = getClaims(token).get("userId");
+        if (userIdObj instanceof Number number) {
+            return number.longValue();
+        }
+        return null;
+    }
+
+    public String getRoleFromToken(String token) {
+        return getClaims(token).get("role", String.class);
     }
 
     public boolean validateToken(String token) {
@@ -56,9 +88,13 @@ public class JwtTokenProvider {
                     .parseSignedClaims(token);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
-            log.error("Invalid JWT token: {}", e.getMessage());
+            log.warn("Invalid JWT token: {}", e.getMessage());
         }
         return false;
+    }
+
+    public long getExpirationMs() {
+        return jwtConfig.getExpirationMs();
     }
 
 }

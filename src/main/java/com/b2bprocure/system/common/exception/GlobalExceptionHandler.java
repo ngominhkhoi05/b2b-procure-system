@@ -64,12 +64,20 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBadCredentialsException(BadCredentialsException ex) {
+    @ExceptionHandler({BadCredentialsException.class, org.springframework.security.core.userdetails.UsernameNotFoundException.class})
+    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(Exception ex) {
         log.warn("Authentication failed: {}", ex.getMessage());
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(ApiResponse.error("Invalid username or password"));
+    }
+
+    @ExceptionHandler({org.springframework.security.authentication.DisabledException.class, org.springframework.security.authentication.LockedException.class})
+    public ResponseEntity<ApiResponse<Void>> handleAccountDisabledException(Exception ex) {
+        log.warn("Account disabled or locked: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error("User account is disabled or inactive"));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
