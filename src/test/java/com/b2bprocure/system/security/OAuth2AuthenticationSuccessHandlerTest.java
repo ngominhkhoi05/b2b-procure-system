@@ -46,6 +46,9 @@ class OAuth2AuthenticationSuccessHandlerTest {
     private JwtConfig jwtConfig;
 
     @Mock
+    private OAuth2LinkStateStore oauth2LinkStateStore;
+
+    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -166,6 +169,209 @@ class OAuth2AuthenticationSuccessHandlerTest {
         assertThat(targetUrl).contains("status=NEED_REGISTER");
         assertThat(targetUrl).contains("registrationToken=mocked.temporary.registration.jwt");
         assertThat(targetUrl).doesNotContain("providerUserId=" + googleSub);
+    }
+
+    @Test
+    @DisplayName("Should redirect with LINK_READY status and linkToken when pending linking state exists")
+    void onAuthenticationSuccess_LinkFlow_Success() throws Exception {
+        // Arrange
+        String googleSub = "google_link_12345";
+        String state = "oauth2_state_abc";
+        Long userId = 10L;
+        Map<String, Object> attributes = Map.of(
+                "sub", googleSub,
+                "email", "user@company.com",
+                "name", "User Name",
+                "picture", "https://avatar.google.com/pic.jpg"
+        );
+        OAuth2User oauth2User = new DefaultOAuth2User(
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
+                attributes,
+                "sub"
+        );
+        OAuth2AuthenticationToken authToken = new OAuth2AuthenticationToken(
+                oauth2User,
+                oauth2User.getAuthorities(),
+                "google"
+        );
+
+        when(response.isCommitted()).thenReturn(false);
+        when(request.getParameter("state")).thenReturn(state);
+        when(oauth2LinkStateStore.getAndRemovePendingOAuth2State(state)).thenReturn(userId);
+        when(authAccountRepository.findByProviderAndProviderUserId(AuthProvider.GOOGLE, googleSub))
+                .thenReturn(Optional.empty());
+        when(authAccountRepository.findByUserIdAndProvider(userId, AuthProvider.GOOGLE))
+                .thenReturn(Optional.empty());
+        when(jwtTokenProvider.generateLinkToken("GOOGLE", googleSub, "user@company.com", userId))
+                .thenReturn("mocked.link.jwt.token");
+
+        // Act
+        successHandler.onAuthenticationSuccess(request, response, authToken);
+
+        // Assert
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(any(), any(), urlCaptor.capture());
+
+        String targetUrl = urlCaptor.getValue();
+        assertThat(targetUrl).startsWith(REDIRECT_URI);
+        assertThat(targetUrl).contains("status=LINK_READY");
+        assertThat(targetUrl).contains("linkToken=mocked.link.jwt.token");
+        verify(oauth2LinkStateStore).recordVerifiedIdentity(userId, AuthProvider.GOOGLE, googleSub, "user@company.com");
+    }
+
+    @Test
+    @DisplayName("Should redirect with ALREADY_LINKED status when Google account is already linked to the same user")
+    void onAuthenticationSuccess_LinkFlow_AlreadyLinkedToSameUser() throws Exception {
+        // Arrange
+        String googleSub = "google_link_same_user";
+        String state = "oauth2_state_same";
+        Long userId = 10L;
+        User user = new User();
+        user.setId(userId);
+        user.setUsername("same_user");
+        AuthAccount existingAccount = AuthAccount.builder()
+                .id(1L)
+                .user(user)
+                .provider(AuthProvider.GOOGLE)
+                .providerUserId(googleSub)
+                .build();
+
+        Map<String, Object> attributes = Map.of(
+                "sub", googleSub,
+                "email", "same@company.com"
+        );
+        OAuth2User oauth2User = new DefaultOAuth2User(
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
+                attributes,
+                "sub"
+        );
+        OAuth2AuthenticationToken authToken = new OAuth2AuthenticationToken(
+                oauth2User,
+                oauth2User.getAuthorities(),
+                "google"
+        );
+
+        when(response.isCommitted()).thenReturn(false);
+        when(request.getParameter("state")).thenReturn(state);
+        when(oauth2LinkStateStore.getAndRemovePendingOAuth2State(state)).thenReturn(userId);
+        when(authAccountRepository.findByProviderAndProviderUserId(AuthProvider.GOOGLE, googleSub))
+                .thenReturn(Optional.of(existingAccount));
+
+        // Act
+        successHandler.onAuthenticationSuccess(request, response, authToken);
+
+        // Assert
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(any(), any(), urlCaptor.capture());
+
+        String targetUrl = urlCaptor.getValue();
+        assertThat(targetUrl).startsWith(REDIRECT_URI);
+        assertThat(targetUrl).contains("status=ALREADY_LINKED");
+    }
+
+    @Test
+    @DisplayName("Should redirect with LINK_ERROR when Google account is already linked to another user")
+    void onAuthenticationSuccess_LinkFlow_AlreadyLinkedToAnotherUser() throws Exception {
+        // Arrange
+        String googleSub = "google_link_other_user";
+        String state = "oauth2_state_other";
+        Long currentUserId = 10L;
+        Long otherUserId = 20L;
+        User otherUser = new User();
+        otherUser.setId(otherUserId);
+        otherUser.setUsername("other_user");
+        AuthAccount existingAccount = AuthAccount.builder()
+                .id(1L)
+                .user(otherUser)
+                .provider(AuthProvider.GOOGLE)
+                .providerUserId(googleSub)
+                .build();
+
+        Map<String, Object> attributes = Map.of(
+                "sub", googleSub,
+                "email", "other@company.com"
+        );
+        OAuth2User oauth2User = new DefaultOAuth2User(
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
+                attributes,
+                "sub"
+        );
+        OAuth2AuthenticationToken authToken = new OAuth2AuthenticationToken(
+                oauth2User,
+                oauth2User.getAuthorities(),
+                "google"
+        );
+
+        when(response.isCommitted()).thenReturn(false);
+        when(request.getParameter("state")).thenReturn(state);
+        when(oauth2LinkStateStore.getAndRemovePendingOAuth2State(state)).thenReturn(currentUserId);
+        when(authAccountRepository.findByProviderAndProviderUserId(AuthProvider.GOOGLE, googleSub))
+                .thenReturn(Optional.of(existingAccount));
+
+        // Act
+        successHandler.onAuthenticationSuccess(request, response, authToken);
+
+        // Assert
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(any(), any(), urlCaptor.capture());
+
+        String targetUrl = urlCaptor.getValue();
+        assertThat(targetUrl).startsWith(REDIRECT_URI);
+        assertThat(targetUrl).contains("status=LINK_ERROR");
+        assertThat(targetUrl).contains("error=account_already_linked_to_another_user");
+    }
+
+    @Test
+    @DisplayName("Should redirect with LINK_ERROR when current user is already linked to a Google account")
+    void onAuthenticationSuccess_LinkFlow_CurrentUserAlreadyHasGoogleAccount() throws Exception {
+        // Arrange
+        String googleSub = "google_link_new_sub";
+        String state = "oauth2_state_user_linked";
+        Long currentUserId = 10L;
+        User currentUser = new User();
+        currentUser.setId(currentUserId);
+        currentUser.setUsername("buyer");
+        AuthAccount existingAccountForUser = AuthAccount.builder()
+                .id(2L)
+                .user(currentUser)
+                .provider(AuthProvider.GOOGLE)
+                .providerUserId("other_sub")
+                .build();
+
+        Map<String, Object> attributes = Map.of(
+                "sub", googleSub,
+                "email", "buyer_new@company.com"
+        );
+        OAuth2User oauth2User = new DefaultOAuth2User(
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
+                attributes,
+                "sub"
+        );
+        OAuth2AuthenticationToken authToken = new OAuth2AuthenticationToken(
+                oauth2User,
+                oauth2User.getAuthorities(),
+                "google"
+        );
+
+        when(response.isCommitted()).thenReturn(false);
+        when(request.getParameter("state")).thenReturn(state);
+        when(oauth2LinkStateStore.getAndRemovePendingOAuth2State(state)).thenReturn(currentUserId);
+        when(authAccountRepository.findByProviderAndProviderUserId(AuthProvider.GOOGLE, googleSub))
+                .thenReturn(Optional.empty());
+        when(authAccountRepository.findByUserIdAndProvider(currentUserId, AuthProvider.GOOGLE))
+                .thenReturn(Optional.of(existingAccountForUser));
+
+        // Act
+        successHandler.onAuthenticationSuccess(request, response, authToken);
+
+        // Assert
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(any(), any(), urlCaptor.capture());
+
+        String targetUrl = urlCaptor.getValue();
+        assertThat(targetUrl).startsWith(REDIRECT_URI);
+        assertThat(targetUrl).contains("status=LINK_ERROR");
+        assertThat(targetUrl).contains("error=user_already_linked_to_different_account");
     }
 
 }

@@ -2,6 +2,7 @@ package com.b2bprocure.system.common.util;
 
 import com.b2bprocure.system.common.constant.SecurityConstants;
 import com.b2bprocure.system.common.exception.UnauthorizedException;
+import com.b2bprocure.system.security.UserPrincipal;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -66,6 +67,24 @@ public final class SecurityUtil {
                 .map(Authentication::getPrincipal)
                 .filter(UserDetails.class::isInstance)
                 .map(UserDetails.class::cast);
+    }
+
+    /**
+     * Get the ID of the currently logged-in user.
+     */
+    public static Optional<Long> getCurrentUserId() {
+        return getCurrentUserDetails()
+                .filter(UserPrincipal.class::isInstance)
+                .map(UserPrincipal.class::cast)
+                .map(UserPrincipal::getId);
+    }
+
+    /**
+     * Get the ID of the currently logged-in user or throw UnauthorizedException.
+     */
+    public static Long getCurrentUserIdOrThrow() {
+        return getCurrentUserId()
+                .orElseThrow(() -> new UnauthorizedException("User is not authenticated"));
     }
 
     /**

@@ -27,6 +27,7 @@ public final class SecurityConstants {
             "/login/oauth2/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
-            "/swagger-ui.html"
+            "/swagger-ui.html",
+            "/error"
     };
 }

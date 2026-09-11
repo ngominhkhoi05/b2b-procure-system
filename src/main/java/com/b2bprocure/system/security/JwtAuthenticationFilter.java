@@ -37,8 +37,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
-                if (jwtTokenProvider.isRegistrationToken(jwt)) {
-                    log.debug("Registration token cannot be used for application authentication");
+                if (jwtTokenProvider.isRegistrationToken(jwt) || jwtTokenProvider.isLinkToken(jwt)) {
+                    log.debug("Temporary token cannot be used for application authentication");
                     filterChain.doFilter(request, response);
                     return;
                 }
@@ -64,6 +64,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String bearerToken = request.getHeader(jwtConfig.getHeader());
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(jwtConfig.getPrefix())) {
             return bearerToken.substring(jwtConfig.getPrefix().length());
+        }
+        String tokenParam = request.getParameter("token");
+        if (StringUtils.hasText(tokenParam)) {
+            return tokenParam;
         }
         return null;
     }

@@ -19,6 +19,8 @@ spring:
     enabled: true
 
 logging:
+  file:
+    name: app.log
   level:
     root: INFO
     com.b2bprocure.system: DEBUG

@@ -29,7 +29,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.WebApplicationContext;
 
+import com.b2bprocure.system.auth.dto.OAuth2LinkRequest;
 import com.b2bprocure.system.auth.dto.OAuth2RegisterRequest;
+import com.b2bprocure.system.auth.dto.RegisterRequest;
 import com.b2bprocure.system.authaccount.entity.AuthAccount;
 import com.b2bprocure.system.authaccount.repository.AuthAccountRepository;
 import com.b2bprocure.system.common.enums.AuthProvider;
@@ -37,6 +39,7 @@ import com.b2bprocure.system.company.dto.CreateCompanyRequest;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.repository.CompanyRepository;
 import com.b2bprocure.system.security.JwtTokenProvider;
+import com.b2bprocure.system.security.OAuth2LinkStateStore;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -77,6 +80,9 @@ public class AuthIntegrationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private OAuth2LinkStateStore oauth2LinkStateStore;
+
     private static boolean initialized = false;
 
     @BeforeEach
@@ -93,6 +99,7 @@ public class AuthIntegrationTest {
 
     private void cleanNonSeedTestData() {
         authAccountRepository.deleteAll();
+        oauth2LinkStateStore.clearAll();
         for (User user : userRepository.findAll()) {
             if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
                 userRepository.delete(user);
@@ -699,6 +706,424 @@ public class AuthIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.message", containsString("Company is inactive")));
+    }
+
+    // ==========================================
+    // ACCOUNT LINKING TESTS (CASES 24 - 33)
+    // ==========================================
+
+    @Test
+    @Order(24)
+    @DisplayName("CASE 24: Unauthenticated request to /oauth2/link fails with 401 Unauthorized")
+    void testOAuth2Link_Unauthenticated_Fails() throws Exception {
+        OAuth2LinkRequest request = new OAuth2LinkRequest();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("authentication is required")));
+    }
+
+    @Test
+    @Order(25)
+    @DisplayName("CASE 25: Authenticated user calling /oauth2/link with missing verified Google identity fails with 400")
+    void testOAuth2Link_MissingVerifiedIdentity_Fails() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+
+        OAuth2LinkRequest request = new OAuth2LinkRequest();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Missing verified Google identity")));
+    }
+
+    @Test
+    @Order(26)
+    @DisplayName("CASE 26: Authenticated user calling /oauth2/link with invalid linkToken fails with 401")
+    void testOAuth2Link_InvalidLinkToken_Fails() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+
+        OAuth2LinkRequest request = OAuth2LinkRequest.builder()
+                .linkToken("invalid.malformed.linkToken")
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Invalid link token")));
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("CASE 27: Authenticated user calling /oauth2/link with linkToken belonging to a different user fails with 403")
+    void testOAuth2Link_TokenUserMismatch_Fails() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+
+        // Generate linkToken for a different userId (9999L)
+        String linkTokenForOtherUser = jwtTokenProvider.generateLinkToken(
+                "GOOGLE", "sub_mismatch_test", "mismatch@gmail.com", 9999L
+        );
+
+        OAuth2LinkRequest request = OAuth2LinkRequest.builder()
+                .linkToken(linkTokenForOtherUser)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Link token does not belong to the authenticated user")));
+    }
+
+    @Test
+    @Order(28)
+    @DisplayName("CASE 28: Authenticated user successfully links Google account via server-side OAuth2LinkStateStore")
+    void testOAuth2Link_Success_ViaStateStore() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String originalPassword = buyer.getPassword();
+        Long buyerId = buyer.getId();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+
+        String googleSub = "google_buyer_sub_verified_101";
+        oauth2LinkStateStore.recordVerifiedIdentity(buyerId, AuthProvider.GOOGLE, googleSub, "buyer_verified@gmail.com");
+
+        OAuth2LinkRequest request = new OAuth2LinkRequest();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.message", is("Google account linked successfully")));
+
+        // Verify AuthAccount created
+        Optional<AuthAccount> accountOpt = authAccountRepository.findByProviderAndProviderUserId(AuthProvider.GOOGLE, googleSub);
+        assertThat(accountOpt).isPresent();
+        assertThat(accountOpt.get().getUser().getId()).isEqualTo(buyerId);
+        assertThat(accountOpt.get().getProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(accountOpt.get().getProviderUserId()).isEqualTo(googleSub);
+
+        // Verify User Entity attributes NOT changed
+        User refreshedBuyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        assertThat(refreshedBuyer.getPassword()).isEqualTo(originalPassword);
+        assertThat(refreshedBuyer.getRole().getName()).isEqualTo("BUYER");
+        assertThat(refreshedBuyer.getCompany()).isNotNull();
+    }
+
+    @Test
+    @Order(29)
+    @DisplayName("CASE 29: Linking already linked Google account to same user is idempotent and returns 200")
+    void testOAuth2Link_AlreadyLinkedToSameUser_Idempotent() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+        String googleSub = "google_buyer_sub_verified_101";
+
+        String linkToken = jwtTokenProvider.generateLinkToken("GOOGLE", googleSub, "buyer_verified@gmail.com", buyer.getId());
+
+        OAuth2LinkRequest request = OAuth2LinkRequest.builder()
+                .linkToken(linkToken)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.message", is("Google account linked successfully")));
+
+        // Verify count in AuthAccount is still 1
+        assertThat(authAccountRepository.findByUserId(buyer.getId())).hasSize(1);
+    }
+
+    @Test
+    @Order(30)
+    @DisplayName("CASE 30: Linking same Google account to a different user fails with 409 Conflict")
+    void testOAuth2Link_AlreadyLinkedToAnotherUser_Fails() throws Exception {
+        User supplier = userRepository.findByUsernameOrEmail("supplier").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(supplier));
+        String googleSub = "google_buyer_sub_verified_101"; // already linked to buyer!
+
+        String linkToken = jwtTokenProvider.generateLinkToken("GOOGLE", googleSub, "buyer_verified@gmail.com", supplier.getId());
+
+        OAuth2LinkRequest request = OAuth2LinkRequest.builder()
+                .linkToken(linkToken)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("already linked to another user")));
+    }
+
+    @Test
+    @Order(31)
+    @DisplayName("CASE 31: User already linked to Google cannot link another Google account (409 Conflict)")
+    void testOAuth2Link_CurrentUserAlreadyLinked_Fails() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String accessToken = jwtTokenProvider.generateToken(UserPrincipal.create(buyer));
+        String newGoogleSub = "google_buyer_sub_brand_new_999";
+
+        String linkToken = jwtTokenProvider.generateLinkToken("GOOGLE", newGoogleSub, "buyer_new@gmail.com", buyer.getId());
+
+        OAuth2LinkRequest request = OAuth2LinkRequest.builder()
+                .linkToken(linkToken)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/oauth2/link")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("already linked to a different Google account")));
+    }
+
+    @Test
+    @Order(32)
+    @DisplayName("CASE 32: Dual login capability: user can login with password AND Google OAuth2 maps to same user")
+    void testOAuth2Link_DualLoginVerification() throws Exception {
+        // 1. Login with username/password
+        LoginRequest loginRequest = LoginRequest.builder()
+                .username("buyer")
+                .password("password123")
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.username", is("buyer")));
+
+        // 2. Google OAuth2 identity resolves to same buyer user
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        AuthAccount linkedAccount = authAccountRepository
+                .findByProviderAndProviderUserId(AuthProvider.GOOGLE, "google_buyer_sub_verified_101")
+                .orElseThrow();
+
+        assertThat(linkedAccount.getUser().getId()).isEqualTo(buyer.getId());
+        assertThat(linkedAccount.getUser().getUsername()).isEqualTo("buyer");
+    }
+
+    @Test
+    @Order(33)
+    @DisplayName("CASE 33: Link token cannot be used to authenticate protected endpoints")
+    void testLinkTokenCannotAccessProtectedEndpoints() throws Exception {
+        User buyer = userRepository.findByUsernameOrEmail("buyer").orElseThrow();
+        String linkToken = jwtTokenProvider.generateLinkToken("GOOGLE", "sub_dummy", "buyer@gmail.com", buyer.getId());
+
+        mockMvc.perform(get("/api/test-protected")
+                        .header("Authorization", "Bearer " + linkToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("authentication is required")));
+    }
+
+    @Test
+    @Order(34)
+    @DisplayName("CASE 34: Register successfully with existing BUYER company")
+    void testRegister_Success_ExistingBuyerCompany() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("new_buyer_user")
+                .password("securePassword123")
+                .fullName("New Buyer Person")
+                .email("newbuyer@example.com")
+                .phone("0981112233")
+                .companyId(1L)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.username", is("new_buyer_user")))
+                .andExpect(jsonPath("$.data.role", is("BUYER")))
+                .andExpect(jsonPath("$.data.accessToken", notNullValue()));
+
+        // Verify password is encrypted in database
+        User createdUser = userRepository.findByUsernameOrEmail("new_buyer_user").orElseThrow();
+        assertThat(createdUser.getPassword()).isNotEqualTo("securePassword123");
+        assertThat(passwordEncoder.matches("securePassword123", createdUser.getPassword())).isTrue();
+        assertThat(createdUser.getCompany().getId()).isEqualTo(1L);
+
+        // Verify newly registered user can login immediately with /login
+        LoginRequest loginRequest = LoginRequest.builder()
+                .username("new_buyer_user")
+                .password("securePassword123")
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.username", is("new_buyer_user")))
+                .andExpect(jsonPath("$.data.role", is("BUYER")));
+    }
+
+    @Test
+    @Order(35)
+    @DisplayName("CASE 35: Register successfully creating new SUPPLIER company")
+    void testRegister_Success_NewSupplierCompany() throws Exception {
+        CreateCompanyRequest companyDto = CreateCompanyRequest.builder()
+                .name("Global Logistics Supplier Corp")
+                .taxCode("0998877665")
+                .email("supplier@globallogistics.com")
+                .phone("0909998888")
+                .address("789 High Street, Da Nang")
+                .build();
+
+        RegisterRequest request = RegisterRequest.builder()
+                .username("supplier_boss")
+                .password("bossPassword123")
+                .fullName("Boss Supplier")
+                .email("boss@globallogistics.com")
+                .phone("0909998888")
+                .companyType("SUPPLIER")
+                .company(companyDto)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.username", is("supplier_boss")))
+                .andExpect(jsonPath("$.data.role", is("SUPPLIER")))
+                .andExpect(jsonPath("$.data.accessToken", notNullValue()));
+
+        User createdUser = userRepository.findByEmailWithRoleAndCompany("boss@globallogistics.com").orElseThrow();
+        assertThat(createdUser.getRole().getName()).isEqualTo("SUPPLIER");
+        assertThat(createdUser.getCompany().getCompanyType()).isEqualTo("SUPPLIER");
+        assertThat(createdUser.getCompany().getStatus()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    @Order(36)
+    @DisplayName("CASE 36: Register fails with duplicate username (409 Conflict)")
+    void testRegister_DuplicateUsername_Returns409() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("buyer")
+                .password("anotherPassword123")
+                .fullName("Duplicate Buyer")
+                .email("distinct_buyer@example.com")
+                .companyId(1L)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Username is already taken")));
+    }
+
+    @Test
+    @Order(37)
+    @DisplayName("CASE 37: Register fails with duplicate email (409 Conflict)")
+    void testRegister_DuplicateEmail_Returns409() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("fresh_user_email_test")
+                .password("anotherPassword123")
+                .fullName("Duplicate Email User")
+                .email("buyer@gmail.com")
+                .companyId(1L)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Email is already registered")));
+    }
+
+    @Test
+    @Order(38)
+    @DisplayName("CASE 38: Register fails without companyId or company details (400 Bad Request)")
+    void testRegister_MissingCompany_Returns400() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("user_without_company")
+                .password("password123")
+                .fullName("No Company User")
+                .email("nocompany@example.com")
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Either companyId or company details must be provided")));
+    }
+
+    @Test
+    @Order(39)
+    @DisplayName("CASE 39: Register fails when requested companyType mismatches selected company (400 Bad Request)")
+    void testRegister_CompanyTypeMismatch_Returns400() throws Exception {
+        // Company 1 is BUYER, but request claims SUPPLIER
+        RegisterRequest request = RegisterRequest.builder()
+                .username("mismatch_user")
+                .password("password123")
+                .fullName("Mismatch User")
+                .email("mismatch@example.com")
+                .companyId(1L)
+                .companyType("SUPPLIER")
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Company type mismatch")));
+    }
+
+    @Test
+    @Order(40)
+    @DisplayName("CASE 40: Register fails when creating company with existing taxCode (409 Conflict)")
+    void testRegister_DuplicateTaxCode_Returns409() throws Exception {
+        // Tax code 0101234567 already belongs to Company 1
+        CreateCompanyRequest companyDto = CreateCompanyRequest.builder()
+                .name("Company With Stolen Tax Code")
+                .taxCode("0101234567")
+                .build();
+
+        RegisterRequest request = RegisterRequest.builder()
+                .username("stolen_tax_user")
+                .password("password123")
+                .fullName("Stolen Tax User")
+                .email("stolentax@example.com")
+                .companyType("BUYER")
+                .company(companyDto)
+                .build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("Tax code already exists")));
     }
 
     @org.junit.jupiter.api.AfterAll
