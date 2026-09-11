@@ -1,5 +1,6 @@
 package com.b2bprocure.system.security;
 
+import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.config.JwtConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -7,6 +8,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +20,18 @@ import java.util.Date;
 @Component
 @RequiredArgsConstructor
 public class JwtTokenProvider {
+
+    public static final String TOKEN_TYPE_ACCESS = "ACCESS";
+    public static final String TOKEN_TYPE_REGISTRATION = "OAUTH2_REGISTRATION";
+    public static final String TOKEN_TYPE_LINK = "OAUTH2_LINK";
+    public static final String CLAIM_TOKEN_TYPE = "type";
+    public static final String CLAIM_PROVIDER = "provider";
+    public static final String CLAIM_PROVIDER_USER_ID = "providerUserId";
+    public static final String CLAIM_EMAIL = "email";
+    public static final String CLAIM_NAME = "name";
+
+    public static final long REGISTRATION_TOKEN_EXPIRATION_MS = 600_000L; // 10 minutes
+    public static final long LINK_TOKEN_EXPIRATION_MS = 600_000L; // 10 minutes
 
     private final JwtConfig jwtConfig;
 
@@ -32,6 +46,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(userPrincipal.getUsername())
+                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS)
                 .claim("userId", userPrincipal.getId())
                 .claim("role", userPrincipal.getRole())
                 .issuedAt(now)
@@ -50,10 +65,101 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(userDetails.getUsername())
+                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS)
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(getSigningKey())
                 .compact();
+    }
+
+    public String generateRegistrationToken(String provider, String providerUserId, String email, String name) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + REGISTRATION_TOKEN_EXPIRATION_MS);
+
+        return Jwts.builder()
+                .subject(providerUserId)
+                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_REGISTRATION)
+                .claim(CLAIM_PROVIDER, provider)
+                .claim(CLAIM_PROVIDER_USER_ID, providerUserId)
+                .claim(CLAIM_EMAIL, email != null ? email : "")
+                .claim(CLAIM_NAME, name != null ? name : "")
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public boolean isRegistrationToken(String token) {
+        try {
+            Claims claims = getClaims(token);
+            String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+            return TOKEN_TYPE_REGISTRATION.equals(tokenType);
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public Claims validateAndGetRegistrationClaims(String token) {
+        if (token == null || token.isBlank()) {
+            throw new BusinessException("Registration token is missing or empty", HttpStatus.UNAUTHORIZED);
+        }
+        try {
+            Claims claims = getClaims(token);
+            String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+            if (!TOKEN_TYPE_REGISTRATION.equals(tokenType)) {
+                throw new BusinessException("Invalid token type for registration", HttpStatus.BAD_REQUEST);
+            }
+            return claims;
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            throw new BusinessException("Registration token has expired", HttpStatus.UNAUTHORIZED);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new BusinessException("Invalid registration token: " + e.getMessage(), HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    public String generateLinkToken(String provider, String providerUserId, String email, Long userId) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + LINK_TOKEN_EXPIRATION_MS);
+
+        return Jwts.builder()
+                .subject(providerUserId)
+                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_LINK)
+                .claim(CLAIM_PROVIDER, provider)
+                .claim(CLAIM_PROVIDER_USER_ID, providerUserId)
+                .claim(CLAIM_EMAIL, email != null ? email : "")
+                .claim("userId", userId)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public boolean isLinkToken(String token) {
+        try {
+            Claims claims = getClaims(token);
+            String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+            return TOKEN_TYPE_LINK.equals(tokenType);
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public Claims validateAndGetLinkClaims(String token) {
+        if (token == null || token.isBlank()) {
+            throw new BusinessException("Link token is missing or empty", HttpStatus.UNAUTHORIZED);
+        }
+        try {
+            Claims claims = getClaims(token);
+            String tokenType = claims.get(CLAIM_TOKEN_TYPE, String.class);
+            if (!TOKEN_TYPE_LINK.equals(tokenType)) {
+                throw new BusinessException("Invalid token type for account linking", HttpStatus.BAD_REQUEST);
+            }
+            return claims;
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            throw new BusinessException("Link token has expired", HttpStatus.UNAUTHORIZED);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new BusinessException("Invalid link token: " + e.getMessage(), HttpStatus.UNAUTHORIZED);
+        }
     }
 
     public Claims getClaims(String token) {

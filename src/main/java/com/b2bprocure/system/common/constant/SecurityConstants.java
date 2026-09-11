@@ -23,8 +23,11 @@ public final class SecurityConstants {
     // Public URL whitelist
     public static final String[] PUBLIC_URLS = {
             "/api/v1/auth/**",
+            "/oauth2/**",
+            "/login/oauth2/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
-            "/swagger-ui.html"
+            "/swagger-ui.html",
+            "/error"
     };
 }
