@@ -5,6 +5,22 @@ spring:
   profiles:
     active: dev
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:placeholder-google-client-id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:placeholder-google-client-secret}
+            scope:
+              - openid
+              - profile
+              - email
+
+app:
+  oauth2:
+    authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth2/redirect}
+
 server:
   port: 8080
 

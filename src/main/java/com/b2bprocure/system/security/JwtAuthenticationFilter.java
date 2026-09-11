@@ -37,6 +37,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
+                if (jwtTokenProvider.isRegistrationToken(jwt)) {
+                    log.debug("Registration token cannot be used for application authentication");
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
                 String username = jwtTokenProvider.getUsernameFromToken(jwt);
 
                 UserDetails userDetails = customUserDetailsService.loadUserByUsername(username);
