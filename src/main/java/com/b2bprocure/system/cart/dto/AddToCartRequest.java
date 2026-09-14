@@ -14,12 +14,16 @@ import lombok.Setter;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "Request to update quantity of a cart item")
-public class UpdateCartItemRequest {
+@Schema(description = "Request to add a product to cart")
+public class AddToCartRequest {
+
+    @NotNull(message = "Product ID is required")
+    @Schema(description = "ID of the product to add", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Long productId;
 
     @NotNull(message = "Quantity is required")
     @Min(value = 1, message = "Quantity must be greater than zero")
-    @Schema(description = "New quantity for the item", example = "100", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Quantity to add", example = "100", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer quantity;
 
 }
