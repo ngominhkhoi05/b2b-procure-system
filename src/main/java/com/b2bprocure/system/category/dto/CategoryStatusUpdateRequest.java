@@ -12,11 +12,9 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UpdateCategoryRequest {
+public class CategoryStatusUpdateRequest {
 
-    @NotBlank(message = "Category name is required")
-    private String name;
-
-    private String description;
+    @NotBlank(message = "Status is required")
+    private String status;
 
 }
