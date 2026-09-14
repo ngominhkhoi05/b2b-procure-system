@@ -14,9 +14,15 @@ public interface CartItemMapper {
     @Mapping(target = "productName", source = "product.name")
     @Mapping(target = "sku", source = "product.sku")
     @Mapping(target = "productImageUrl", source = "product.imageUrl")
+    @Mapping(target = "supplierCompanyId", source = "product.supplierCompany.id")
+    @Mapping(target = "supplierCompanyName", source = "product.supplierCompany.name")
+    @Mapping(target = "productStatus", source = "product.status")
+    @Mapping(target = "categoryStatus", source = "product.category.status")
+    @Mapping(target = "stockQuantity", source = "product.stockQuantity")
     @Mapping(target = "quantity", source = "quantity")
     @Mapping(target = "unitPrice", ignore = true)
     @Mapping(target = "subtotal", ignore = true)
+    @Mapping(target = "available", ignore = true)
     CartItemResponse toResponse(CartItem cartItem);
 
     List<CartItemResponse> toResponseList(List<CartItem> cartItems);
