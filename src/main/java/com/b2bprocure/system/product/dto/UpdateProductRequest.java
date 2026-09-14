@@ -18,6 +18,8 @@ public class UpdateProductRequest {
 
     private Long categoryId;
 
+    private String sku;
+
     @NotBlank(message = "Product name is required")
     private String name;
 
@@ -28,7 +30,4 @@ public class UpdateProductRequest {
 
     @PositiveOrZero(message = "Stock quantity must be zero or positive")
     private Integer stockQuantity;
-
-    private String status;
-
 }

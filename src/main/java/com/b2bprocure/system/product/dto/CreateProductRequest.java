@@ -17,6 +17,8 @@ import lombok.Setter;
 @Builder
 public class CreateProductRequest {
 
+    private Long supplierCompanyId;
+
     @NotNull(message = "Category ID is required")
     private Long categoryId;
 
@@ -33,7 +35,4 @@ public class CreateProductRequest {
 
     @PositiveOrZero(message = "Stock quantity must be zero or positive")
     private Integer stockQuantity;
-
-    private String status;
-
 }
