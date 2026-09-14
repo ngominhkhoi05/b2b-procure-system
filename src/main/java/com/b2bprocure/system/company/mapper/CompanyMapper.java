@@ -25,6 +25,7 @@ public interface CompanyMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "taxCode", ignore = true)
     @Mapping(target = "companyType", ignore = true)
+    @Mapping(target = "status", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     void updateEntity(UpdateCompanyRequest request, @MappingTarget Company company);

@@ -18,13 +18,12 @@ public class UpdateCompanyRequest {
     @NotBlank(message = "Company name is required")
     private String name;
 
+    private String taxCode;
+
     @Email(message = "Invalid email format")
     private String email;
 
     private String phone;
 
     private String address;
-
-    private String status;
-
 }
