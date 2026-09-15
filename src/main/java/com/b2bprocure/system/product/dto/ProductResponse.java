@@ -23,6 +23,7 @@ public class ProductResponse {
     private String description;
     private String imageUrl;
     private Integer stockQuantity;
+    private Integer reservedQuantity;
     private String status;
     private Long categoryId;
     private String categoryName;

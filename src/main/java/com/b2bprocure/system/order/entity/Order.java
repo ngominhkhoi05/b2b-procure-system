@@ -61,6 +61,15 @@ public class Order {
     @Column(name = "total_amount", precision = 15, scale = 2)
     private BigDecimal totalAmount;
 
+    @Column(name = "shipping_company_name")
+    private String shippingCompanyName;
+
+    @Column(name = "shipping_phone")
+    private String shippingPhone;
+
+    @Column(name = "shipping_address")
+    private String shippingAddress;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

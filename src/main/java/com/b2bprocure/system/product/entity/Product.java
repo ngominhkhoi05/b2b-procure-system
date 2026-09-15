@@ -53,6 +53,9 @@ public class Product {
     @Column(name = "stock_quantity")
     private Integer stockQuantity;
 
+    @Column(name = "reserved_quantity", nullable = false)
+    private Integer reservedQuantity = 0;
+
     @Column(name = "status")
     private String status;
 
