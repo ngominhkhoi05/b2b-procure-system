@@ -7,14 +7,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum OrderStatus {
 
-    PENDING("Chờ xử lý"),
+    PENDING_CONFIRMATION("Chờ xác nhận"),
+    PAID("Đã thanh toán"),
     CONFIRMED("Đã xác nhận"),
-    PROCESSING("Đang xử lý"),
-    SHIPPED("Đang giao hàng"),
-    DELIVERED("Đã giao hàng"),
+    PREPARING("Đang chuẩn bị hàng"),
+    SHIPPING("Đang giao hàng"),
     COMPLETED("Hoàn thành"),
-    CANCELLED("Đã hủy"),
-    REJECTED("Bị từ chối");
+    REJECTED("Bị từ chối"),
+    CANCELLED("Đã hủy");
 
     private final String description;
 }

@@ -26,6 +26,9 @@ public class OrderResponse {
     private BigDecimal commissionRate;
     private BigDecimal commissionAmount;
     private BigDecimal totalAmount;
+    private String shippingCompanyName;
+    private String shippingPhone;
+    private String shippingAddress;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
