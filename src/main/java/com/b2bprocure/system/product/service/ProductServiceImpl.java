@@ -278,6 +278,14 @@ public class ProductServiceImpl implements ProductService {
             if (request.getStockQuantity() < 0) {
                 throw new BusinessException("Stock quantity must be zero or positive", HttpStatus.BAD_REQUEST);
             }
+            int currentReserved = product.getReservedQuantity() != null ? product.getReservedQuantity() : 0;
+            if (request.getStockQuantity() < currentReserved) {
+                throw new BusinessException(
+                        String.format("Stock quantity (%d) cannot be less than currently reserved quantity (%d)",
+                                request.getStockQuantity(), currentReserved),
+                        HttpStatus.BAD_REQUEST
+                );
+            }
             product.setStockQuantity(request.getStockQuantity());
         }
 

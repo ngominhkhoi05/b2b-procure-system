@@ -65,4 +65,11 @@ public class Product {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    public Integer getAvailableQuantity() {
+        int stock = stockQuantity != null ? stockQuantity : 0;
+        int reserved = reservedQuantity != null ? reservedQuantity : 0;
+        return Math.max(0, stock - reserved);
+    }
+
 }
+

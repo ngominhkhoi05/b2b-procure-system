@@ -110,6 +110,7 @@ public class CartIntegrationTest {
     private static Long inactiveProductId;
     private static Long inactiveCatProductId;
     private static Long boundedTierProductId;
+    private static Long reservedProductId;
 
     private static boolean initialized = false;
 
@@ -124,7 +125,7 @@ public class CartIntegrationTest {
             cartRepository.deleteAll();
 
             // Chỉ xóa các sản phẩm test của riêng CartIntegrationTest (theo SKU), KHÔNG xóa sản phẩm của người dùng tạo trên Swagger
-            List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005");
+            List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005", "CART-SKU-RESERVED-001");
             for (String sku : testSkus) {
                 productRepository.findAll().stream()
                         .filter(p -> sku.equalsIgnoreCase(p.getSku()))
@@ -296,6 +297,25 @@ public class CartIntegrationTest {
             ProductPrice pp5_2 = new ProductPrice(null, p5, 50, 99, new BigDecimal("95000.00"), LocalDateTime.now(), LocalDateTime.now());
             ProductPrice pp5_3 = new ProductPrice(null, p5, 100, 500, new BigDecimal("90000.00"), LocalDateTime.now(), LocalDateTime.now());
             productPriceRepository.saveAll(List.of(pp5_1, pp5_2, pp5_3));
+
+            // Product Reserved Test (Stock: 100, Reserved: 0)
+            Product pReserved = new Product();
+            pReserved.setSupplierCompany(supplierUser.getCompany());
+            pReserved.setCategory(activeCategory);
+            pReserved.setSku("CART-SKU-RESERVED-001");
+            pReserved.setName("Reserved Test Product");
+            pReserved.setDescription("Product for reserved quantity testing");
+            pReserved.setImageUrl("https://example.com/reserved.png");
+            pReserved.setStockQuantity(100);
+            pReserved.setReservedQuantity(0);
+            pReserved.setStatus("ACTIVE");
+            pReserved.setCreatedAt(LocalDateTime.now());
+            pReserved.setUpdatedAt(LocalDateTime.now());
+            pReserved = productRepository.save(pReserved);
+            reservedProductId = pReserved.getId();
+
+            ProductPrice ppReserved = new ProductPrice(null, pReserved, 1, null, new BigDecimal("100000.00"), LocalDateTime.now(), LocalDateTime.now());
+            productPriceRepository.save(ppReserved);
 
             initialized = true;
         }
@@ -1154,10 +1174,329 @@ public class CartIntegrationTest {
         // Restore category
         cat.setStatus("ACTIVE");
         categoryRepository.save(cat);
+    }
 
-        // Clean up cart items at the end of test class
-        cartItemRepository.deleteAll();
-        cartRepository.deleteAll();
+    // =========================================================================
+    // Scenario 38: Reserved stock = 0, add quantity = 50 -> OK
+    // =========================================================================
+    @Test
+    @Order(38)
+    @DisplayName("38. Reserved Quantity: stock = 100, reserved = 0, add quantity = 50 -> 201 CREATED")
+    void testAddToCartWithZeroReservedStockSuccess() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(0);
+        productRepository.save(p);
+
+        AddToCartRequest request = AddToCartRequest.builder()
+                .productId(reservedProductId)
+                .quantity(50)
+                .build();
+
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.quantity", is(50)))
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(100)))
+                .andExpect(jsonPath("$.data.available", is(true)));
+    }
+
+    // =========================================================================
+    // Scenario 39: stock = 100, reserved = 80 (available = 20), add quantity = 20 -> OK
+    // =========================================================================
+    @Test
+    @Order(39)
+    @DisplayName("39. Reserved Quantity: stock = 100, reserved = 80, available = 20, add quantity = 20 -> 201 CREATED")
+    void testAddToCartExactAvailableStockSuccess() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        AddToCartRequest request = AddToCartRequest.builder()
+                .productId(reservedProductId)
+                .quantity(20)
+                .build();
+
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.quantity", is(20)))
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(20)))
+                .andExpect(jsonPath("$.data.available", is(true)));
+    }
+
+    // =========================================================================
+    // Scenario 40: stock = 100, reserved = 80 (available = 20), add quantity = 21 -> 400
+    // =========================================================================
+    @Test
+    @Order(40)
+    @DisplayName("40. Reserved Quantity: stock = 100, reserved = 80, available = 20, add quantity = 21 -> 400 BAD_REQUEST")
+    void testAddToCartExceedingAvailableStockRejected() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        AddToCartRequest request = AddToCartRequest.builder()
+                .productId(reservedProductId)
+                .quantity(21)
+                .build();
+
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("exceeds available stock")));
+    }
+
+    // =========================================================================
+    // Scenario 41: stock = 100, reserved = 80, cart has 10, add 10 (total = 20) -> OK
+    // =========================================================================
+    @Test
+    @Order(41)
+    @DisplayName("41. Reserved Quantity: stock = 100, reserved = 80, cart has 10, add 10 (total = 20) -> 201 CREATED")
+    void testAddToCartExistingItemWithinAvailableStockSuccess() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        // Add 10
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(10).build())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.quantity", is(10)));
+
+        // Add 10 more (total = 20 <= available 20)
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(10).build())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.quantity", is(20)))
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(20)))
+                .andExpect(jsonPath("$.data.available", is(true)));
+    }
+
+    // =========================================================================
+    // Scenario 42: stock = 100, reserved = 80, cart has 10, add 11 (total = 21) -> 400
+    // =========================================================================
+    @Test
+    @Order(42)
+    @DisplayName("42. Reserved Quantity: stock = 100, reserved = 80, cart has 10, add 11 (total = 21 > 20) -> 400 BAD_REQUEST")
+    void testAddToCartExistingItemExceedingAvailableStockRejected() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        // Add initial 10
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(10).build())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.quantity", is(10)));
+
+        // Add 11 more (total = 21 > available 20)
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(11).build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("exceeds available stock")));
+    }
+
+    // =========================================================================
+    // Scenario 43: stock = 100, reserved = 80, update CartItem quantity = 20 -> OK
+    // =========================================================================
+    @Test
+    @Order(43)
+    @DisplayName("43. Reserved Quantity: stock = 100, reserved = 80, update CartItem quantity = 20 -> 200 OK")
+    void testUpdateCartItemQuantityExactAvailableStockSuccess() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        // Add initial 5
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(5).build())))
+                .andExpect(status().isCreated());
+
+        // Update quantity to 20
+        UpdateCartItemRequest updateReq = UpdateCartItemRequest.builder().quantity(20).build();
+        mockMvc.perform(put("/api/v1/cart/items/" + reservedProductId)
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.quantity", is(20)))
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(20)))
+                .andExpect(jsonPath("$.data.available", is(true)));
+    }
+
+    // =========================================================================
+    // Scenario 44: stock = 100, reserved = 80, update CartItem quantity = 21 -> 400
+    // =========================================================================
+    @Test
+    @Order(44)
+    @DisplayName("44. Reserved Quantity: stock = 100, reserved = 80, update CartItem quantity = 21 -> 400 BAD_REQUEST")
+    void testUpdateCartItemQuantityExceedingAvailableStockRejected() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        // Add initial 5
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(5).build())))
+                .andExpect(status().isCreated());
+
+        // Update quantity to 21
+        UpdateCartItemRequest updateReq = UpdateCartItemRequest.builder().quantity(21).build();
+        mockMvc.perform(put("/api/v1/cart/items/" + reservedProductId)
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("exceeds available stock")));
+    }
+
+    // =========================================================================
+    // Scenario 45: Product stock = 100, reserved = 80, cart = 20. Then reserved = 90 -> available = false
+    // =========================================================================
+    @Test
+    @Order(45)
+    @DisplayName("45. Reserved Quantity: reserved increased in DB after add -> GET /api/v1/cart marks available = false")
+    void testGetCartReflectsAvailableFalseWhenReservedQuantityIncreases() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(80);
+        productRepository.save(p);
+
+        // Add quantity 20
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(20).build())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.available", is(true)));
+
+        // Simulate reservedQuantity increasing to 90 (e.g. from an order) -> available becomes 10 (< 20 in cart)
+        p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setReservedQuantity(90);
+        productRepository.save(p);
+
+        // GET /api/v1/cart
+        mockMvc.perform(get("/api/v1/cart")
+                        .header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[?(@.productId == " + reservedProductId + ")].quantity").value(20))
+                .andExpect(jsonPath("$.data.items[?(@.productId == " + reservedProductId + ")].stockQuantity").value(100))
+                .andExpect(jsonPath("$.data.items[?(@.productId == " + reservedProductId + ")].availableQuantity").value(10))
+                .andExpect(jsonPath("$.data.items[?(@.productId == " + reservedProductId + ")].available").value(false));
+    }
+
+    // =========================================================================
+    // Scenario 46: Cart add and update do NOT alter stockQuantity or reservedQuantity
+    // =========================================================================
+    @Test
+    @Order(46)
+    @DisplayName("46. Reserved Quantity: Cart add and update do not alter stockQuantity or reservedQuantity")
+    void testCartAddAndUpdateDoNotAlterStockOrReserved() throws Exception {
+        // Clear buyer 1 cart
+        mockMvc.perform(delete("/api/v1/cart").header("Authorization", "Bearer " + buyer1Token))
+                .andExpect(status().isOk());
+
+        Product p = productRepository.findById(reservedProductId).orElseThrow();
+        p.setStockQuantity(100);
+        p.setReservedQuantity(30);
+        productRepository.save(p);
+
+        // Verify state before add
+        Product beforeAdd = productRepository.findById(reservedProductId).orElseThrow();
+        assertEquals(100, beforeAdd.getStockQuantity());
+        assertEquals(30, beforeAdd.getReservedQuantity());
+
+        // Add quantity 15
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(AddToCartRequest.builder().productId(reservedProductId).quantity(15).build())))
+                .andExpect(status().isCreated());
+
+        // Verify state after add
+        Product afterAdd = productRepository.findById(reservedProductId).orElseThrow();
+        assertEquals(100, afterAdd.getStockQuantity());
+        assertEquals(30, afterAdd.getReservedQuantity());
+
+        // Update quantity to 25
+        mockMvc.perform(put("/api/v1/cart/items/" + reservedProductId)
+                        .header("Authorization", "Bearer " + buyer1Token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UpdateCartItemRequest.builder().quantity(25).build())))
+                .andExpect(status().isOk());
+
+        // Verify state after update
+        Product afterUpdate = productRepository.findById(reservedProductId).orElseThrow();
+        assertEquals(100, afterUpdate.getStockQuantity());
+        assertEquals(30, afterUpdate.getReservedQuantity());
     }
 
     @AfterAll
@@ -1171,7 +1510,7 @@ public class CartIntegrationTest {
         cartRepository.deleteAll();
 
         // Chỉ xóa sản phẩm test của riêng test class này, không xóa dữ liệu người dùng
-        List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005");
+        List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005", "CART-SKU-RESERVED-001");
         for (String sku : testSkus) {
             productRepository.findAll().stream()
                     .filter(p -> sku.equalsIgnoreCase(p.getSku()))

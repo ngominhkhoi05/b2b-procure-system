@@ -1176,6 +1176,152 @@ public class ProductIntegrationTest {
                 .andExpect(jsonPath("$.message", containsString("does not belong to product")));
     }
 
+    // ========================================================================
+    // 6. RESERVED & AVAILABLE QUANTITY TESTS (Test 61 - 66)
+    // ========================================================================
+
+    private static Long reservedStockTestProductId;
+
+    @Test
+    @Order(62)
+    @DisplayName("61. Create Product: stock=100 -> reserved=0, available=100")
+    void test61_CreateProduct_ReservedZero_AvailableEqualsStock() throws Exception {
+        CreateProductRequest request = CreateProductRequest.builder()
+                .categoryId(activeCategoryId)
+                .sku("SKU-RESERVED-001")
+                .name("Reserved Test Product 1")
+                .stockQuantity(100)
+                .build();
+
+        MvcResult result = mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.reservedQuantity", is(0)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(100)))
+                .andReturn();
+
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        reservedStockTestProductId = root.path("data").path("id").asLong();
+    }
+
+    @Test
+    @Order(63)
+    @DisplayName("62. Client sends reservedQuantity when CREATE -> reservedQuantity remains 0, available=100")
+    void test62_CreateProduct_IgnoresReservedQuantityInRequest() throws Exception {
+        String jsonWithReserved = String.format("""
+                {
+                    "categoryId": %d,
+                    "sku": "SKU-RESERVED-OVERRIDE",
+                    "name": "Malicious Create Product",
+                    "stockQuantity": 100,
+                    "reservedQuantity": 50
+                }
+                """, activeCategoryId);
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonWithReserved))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.stockQuantity", is(100)))
+                .andExpect(jsonPath("$.data.reservedQuantity", is(0)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(100)));
+    }
+
+    @Test
+    @Order(64)
+    @DisplayName("63. Client sends reservedQuantity when UPDATE -> reservedQuantity remains unchanged")
+    void test63_UpdateProduct_IgnoresReservedQuantityInRequest() throws Exception {
+        Product product = productRepository.findById(reservedStockTestProductId).orElseThrow();
+        product.setStockQuantity(100);
+        product.setReservedQuantity(30);
+        productRepository.save(product);
+
+        String jsonUpdateWithReserved = """
+                {
+                    "name": "Updated Reserved Test Product",
+                    "stockQuantity": 80,
+                    "reservedQuantity": 0
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/products/" + reservedStockTestProductId)
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonUpdateWithReserved))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stockQuantity", is(80)))
+                .andExpect(jsonPath("$.data.reservedQuantity", is(30)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(50)));
+
+        Product refreshed = productRepository.findById(reservedStockTestProductId).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(30, refreshed.getReservedQuantity());
+        org.junit.jupiter.api.Assertions.assertEquals(80, refreshed.getStockQuantity());
+    }
+
+    @Test
+    @Order(65)
+    @DisplayName("64. Supplier updates stock >= reserved -> 200 OK (stock=50, reserved=30, available=20)")
+    void test64_SupplierUpdateStock_GreaterThanReserved_Success() throws Exception {
+        UpdateProductRequest request = UpdateProductRequest.builder()
+                .name("Updated Reserved Test Product")
+                .stockQuantity(50)
+                .build();
+
+        mockMvc.perform(put("/api/v1/products/" + reservedStockTestProductId)
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stockQuantity", is(50)))
+                .andExpect(jsonPath("$.data.reservedQuantity", is(30)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(20)));
+    }
+
+    @Test
+    @Order(66)
+    @DisplayName("65. Supplier updates stock == reserved -> 200 OK (stock=30, reserved=30, available=0)")
+    void test65_SupplierUpdateStock_EqualToReserved_Success() throws Exception {
+        UpdateProductRequest request = UpdateProductRequest.builder()
+                .name("Updated Reserved Test Product")
+                .stockQuantity(30)
+                .build();
+
+        mockMvc.perform(put("/api/v1/products/" + reservedStockTestProductId)
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stockQuantity", is(30)))
+                .andExpect(jsonPath("$.data.reservedQuantity", is(30)))
+                .andExpect(jsonPath("$.data.availableQuantity", is(0)));
+    }
+
+    @Test
+    @Order(67)
+    @DisplayName("66. Supplier updates stock < reserved -> 400 Bad Request (stock=29 < reserved=30)")
+    void test66_SupplierUpdateStock_LessThanReserved_BadRequest() throws Exception {
+        UpdateProductRequest request = UpdateProductRequest.builder()
+                .name("Updated Reserved Test Product")
+                .stockQuantity(29)
+                .build();
+
+        mockMvc.perform(put("/api/v1/products/" + reservedStockTestProductId)
+                        .header("Authorization", "Bearer " + supplierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", containsString("cannot be less than currently reserved quantity")));
+
+        Product refreshed = productRepository.findById(reservedStockTestProductId).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(30, refreshed.getStockQuantity());
+        org.junit.jupiter.api.Assertions.assertEquals(30, refreshed.getReservedQuantity());
+    }
+
     @AfterAll
     static void tearDown(
             @Autowired ProductPriceRepository productPriceRepository,

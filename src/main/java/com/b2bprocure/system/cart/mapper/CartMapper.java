@@ -20,6 +20,7 @@ public interface CartMapper {
     @Mapping(target = "productStatus", source = "cartItem.product.status")
     @Mapping(target = "categoryStatus", source = "cartItem.product.category.status")
     @Mapping(target = "stockQuantity", source = "cartItem.product.stockQuantity")
+    @Mapping(target = "availableQuantity", source = "cartItem.product.availableQuantity")
     @Mapping(target = "unitPrice", source = "unitPrice")
     @Mapping(target = "subtotal", source = "subtotal")
     @Mapping(target = "available", source = "available")
