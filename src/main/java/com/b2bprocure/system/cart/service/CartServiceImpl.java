@@ -88,7 +88,8 @@ public class CartServiceImpl implements CartService {
     private boolean isAvailable(Product product, Integer quantity) {
         boolean isProductActive = "ACTIVE".equalsIgnoreCase(product.getStatus());
         boolean isCategoryActive = product.getCategory() != null && "ACTIVE".equalsIgnoreCase(product.getCategory().getStatus());
-        boolean isStockSufficient = product.getStockQuantity() != null && quantity != null && product.getStockQuantity() >= quantity;
+        int availableStock = product.getAvailableQuantity() != null ? product.getAvailableQuantity() : 0;
+        boolean isStockSufficient = quantity != null && availableStock >= quantity;
         return isProductActive && isCategoryActive && isStockSufficient;
     }
 
@@ -178,7 +179,7 @@ public class CartServiceImpl implements CartService {
 
         Optional<CartItem> existingItemOpt = cartItemRepository.findByCartIdAndProductIdWithDetails(cart.getId(), product.getId());
 
-        int availableStock = product.getStockQuantity() != null ? product.getStockQuantity() : 0;
+        int availableStock = product.getAvailableQuantity() != null ? product.getAvailableQuantity() : 0;
         CartItem savedItem;
 
         if (existingItemOpt.isPresent()) {
@@ -239,7 +240,7 @@ public class CartServiceImpl implements CartService {
         }
 
         int requestedQuantity = request.getQuantity();
-        int availableStock = product.getStockQuantity() != null ? product.getStockQuantity() : 0;
+        int availableStock = product.getAvailableQuantity() != null ? product.getAvailableQuantity() : 0;
 
         if (requestedQuantity > availableStock) {
             throw new BusinessException("Requested quantity (" + requestedQuantity + ") exceeds available stock (" + availableStock + ")", HttpStatus.BAD_REQUEST);

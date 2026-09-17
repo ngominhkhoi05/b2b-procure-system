@@ -50,8 +50,11 @@ public class CartItemResponse {
     @Schema(description = "Current category status", example = "ACTIVE")
     private String categoryStatus;
 
-    @Schema(description = "Current stock quantity available", example = "150")
+    @Schema(description = "Current stock quantity in warehouse", example = "150")
     private Integer stockQuantity;
+
+    @Schema(description = "Current available quantity (stockQuantity - reservedQuantity)", example = "100")
+    private Integer availableQuantity;
 
     @Schema(description = "Whether item is available (product active, category active, sufficient stock)", example = "true")
     private Boolean available;
