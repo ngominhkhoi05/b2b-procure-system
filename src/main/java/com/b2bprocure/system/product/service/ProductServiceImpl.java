@@ -16,6 +16,7 @@ import com.b2bprocure.system.product.dto.ProductStatusUpdateRequest;
 import com.b2bprocure.system.product.dto.UpdateProductRequest;
 import com.b2bprocure.system.product.entity.Product;
 import com.b2bprocure.system.product.mapper.ProductMapper;
+import com.b2bprocure.system.product.repository.ProductPriceRepository;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.user.entity.User;
 import com.b2bprocure.system.user.repository.UserRepository;
@@ -38,6 +39,7 @@ import java.util.Optional;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+    private final ProductPriceRepository productPriceRepository;
     private final CategoryRepository categoryRepository;
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
@@ -180,12 +182,17 @@ public class ProductServiceImpl implements ProductService {
                 ? "%" + request.getKeyword().trim().toLowerCase() + "%"
                 : null;
 
+        // For Buyer: require at least one price_product to be visible
+        // For Admin/Supplier: see all products (no price requirement)
+        boolean requireHasPrices = isBuyer;
+
         Page<Product> productPage = productRepository.searchProducts(
                 supplierCompanyId,
                 categoryId,
                 status,
                 categoryStatus,
                 pattern,
+                requireHasPrices,
                 pageable
         );
 
@@ -223,6 +230,10 @@ public class ProductServiceImpl implements ProductService {
             // Buyer only sees ACTIVE product whose category is also ACTIVE
             // Return 404 to avoid leaking existence
             if (!"ACTIVE".equalsIgnoreCase(product.getStatus()) || !"ACTIVE".equalsIgnoreCase(product.getCategory().getStatus())) {
+                throw new ResourceNotFoundException("Product", "id", id);
+            }
+            // Buyer also requires the product to have at least one price_product
+            if (!productPriceRepository.existsByProductId(id)) {
                 throw new ResourceNotFoundException("Product", "id", id);
             }
             return productMapper.toResponse(product);

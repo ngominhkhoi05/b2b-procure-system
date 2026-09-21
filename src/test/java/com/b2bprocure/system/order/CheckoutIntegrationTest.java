@@ -939,4 +939,192 @@ public class CheckoutIntegrationTest {
         assertThat(cartItemRepository.findById(item.getId())).isPresent();
     }
 
+    // =========================================================================
+    // PRICE TIER FALLBACK TESTS (last tier's max is a marker, not a cap)
+    // =========================================================================
+
+    /**
+     * Helper: extract the subtotal of the most recent order created by the
+     * current checkout call. Used to assert the unit-price fallback rule.
+     */
+    private BigDecimal extractSubtotal(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("subtotal").decimalValue();
+    }
+
+    @Test
+    @DisplayName("Case 22: Quantity 31 (exceeds last tier max=30) uses last tier price 80,000")
+    void testCheckout_FallbackLastTier_Quantity31() throws Exception {
+        Product p = createProduct(supplierCompany1, "Fallback Tier Prod 31", 200, 0, "ACTIVE", category);
+        // Tiers: 1-10 -> 100,000; 11-20 -> 90,000; 21-30 -> 80,000
+        // No tier has max_quantity = null. Last tier is 21-30.
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 11, 20, new BigDecimal("90000.00"));
+        createPriceTier(p, 21, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 31);
+        MvcResult res = mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.data.subtotal", is(31 * 80000.00)))
+                .andReturn();
+        createdOrderIds.add(objectMapper.readTree(res.getResponse().getContentAsString())
+                .path("data").path("orderId").asLong());
+    }
+
+    @Test
+    @DisplayName("Case 23: Quantity 41 (exceeds last tier max=30) uses last tier price 80,000")
+    void testCheckout_FallbackLastTier_Quantity41() throws Exception {
+        Product p = createProduct(supplierCompany1, "Fallback Tier Prod 41", 200, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 11, 20, new BigDecimal("90000.00"));
+        createPriceTier(p, 21, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 41);
+        MvcResult res = mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.subtotal", is(41 * 80000.00)))
+                .andReturn();
+        createdOrderIds.add(objectMapper.readTree(res.getResponse().getContentAsString())
+                .path("data").path("orderId").asLong());
+    }
+
+    @Test
+    @DisplayName("Case 24: Quantity 100 (way above last tier max=30) uses last tier price 80,000")
+    void testCheckout_FallbackLastTier_Quantity100() throws Exception {
+        Product p = createProduct(supplierCompany1, "Fallback Tier Prod 100", 200, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 11, 20, new BigDecimal("90000.00"));
+        createPriceTier(p, 21, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 100);
+        MvcResult res = mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.subtotal", is(100 * 80000.00)))
+                .andReturn();
+        createdOrderIds.add(objectMapper.readTree(res.getResponse().getContentAsString())
+                .path("data").path("orderId").asLong());
+    }
+
+    @Test
+    @DisplayName("Case 25: Quantity 30 (exact last tier max=30) still uses last tier price 80,000 (no fallback needed)")
+    void testCheckout_LastTierMaxBoundary_Quantity30() throws Exception {
+        Product p = createProduct(supplierCompany1, "Exact Max Boundary", 200, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 11, 20, new BigDecimal("90000.00"));
+        createPriceTier(p, 21, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 30);
+        MvcResult res = mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.subtotal", is(30 * 80000.00)))
+                .andReturn();
+        createdOrderIds.add(objectMapper.readTree(res.getResponse().getContentAsString())
+                .path("data").path("orderId").asLong());
+    }
+
+    @Test
+    @DisplayName("Case 26: Quantity 5 (within first tier) uses first tier price 100,000 (regression check)")
+    void testCheckout_FirstTier_Quantity5() throws Exception {
+        Product p = createProduct(supplierCompany1, "First Tier Prod", 200, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 11, 20, new BigDecimal("90000.00"));
+        createPriceTier(p, 21, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 5);
+        MvcResult res = mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.subtotal", is(5 * 100000.00)))
+                .andReturn();
+        createdOrderIds.add(objectMapper.readTree(res.getResponse().getContentAsString())
+                .path("data").path("orderId").asLong());
+    }
+
+    @Test
+    @DisplayName("Case 27: Quantity below all tiers (e.g. 5 when min=10) is still rejected (no fallback)")
+    void testCheckout_BelowAllTiers_StillRejected() throws Exception {
+        // Tiers start at 10. quantity=5 falls below all tiers; not > max of last
+        // tier, so no fallback applies. Should still throw NO_MATCHING_PRICE_TIER.
+        Product p = createProduct(supplierCompany1, "Below All Tiers Prod", 100, 0, "ACTIVE", category);
+        createPriceTier(p, 10, 50, new BigDecimal("100000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 5);
+        mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("No matching price tier")));
+
+        // Verify rollback: reservation is zero, cart item remains.
+        Product checkP = productRepository.findById(p.getId()).orElseThrow();
+        assertThat(checkP.getReservedQuantity()).isEqualTo(0);
+        assertThat(cartItemRepository.findById(item.getId())).isPresent();
+    }
+
+    @Test
+    @DisplayName("Case 28: Quantity in tier gap (e.g. 15 with tiers 1-10, 20-30) is still rejected (no fallback)")
+    void testCheckout_QuantityInGap_StillRejected() throws Exception {
+        // Tiers: 1-10 and 20-30. No tier covers 11-19.
+        // quantity=15 is not > 30 (last max) → no fallback.
+        Product p = createProduct(supplierCompany1, "Gap Prod", 100, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 10, new BigDecimal("100000.00"));
+        createPriceTier(p, 20, 30, new BigDecimal("80000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 15);
+        mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("No matching price tier")));
+
+        // Verify rollback
+        Product checkP = productRepository.findById(p.getId()).orElseThrow();
+        assertThat(checkP.getReservedQuantity()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("Case 29: Quantity 0 (invalid) is rejected (no fallback)")
+    void testCheckout_QuantityZero_StillRejected() throws Exception {
+        // Tier covers 1-100, quantity = 0 is invalid input → caught earlier
+        // by INVALID_CART_ITEM validation, not converted into fallback tier.
+        Product p = createProduct(supplierCompany1, "Zero Qty Prod", 100, 0, "ACTIVE", category);
+        createPriceTier(p, 1, 100, new BigDecimal("50000.00"));
+
+        CartItem item = addItemToUserCart(buyerUser, p, 0);
+        mockMvc.perform(post("/api/v1/checkout")
+                        .header("Authorization", "Bearer " + buyerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CheckoutRequest(List.of(item.getId()), PaymentMethod.COD))))
+                .andExpect(status().isBadRequest());
+
+        // Verify rollback
+        Product checkP = productRepository.findById(p.getId()).orElseThrow();
+        assertThat(checkP.getReservedQuantity()).isEqualTo(0);
+    }
+
 }

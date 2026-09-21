@@ -256,6 +256,8 @@ public class ZaloPayServiceImpl implements ZaloPayService {
 
             // 9. Update Order to PAID
             Order order = payment.getOrder();
+            log.info("ZaloPay callback - checking order: orderId={}, currentStatus={}, expectedStatus={}",
+                    order.getId(), order.getStatus(), OrderStatus.PENDING_CONFIRMATION);
             if (order.getStatus() == OrderStatus.PENDING_CONFIRMATION) {
                 order.setStatus(OrderStatus.PAID);
                 order.setUpdatedAt(LocalDateTime.now());

@@ -11,6 +11,7 @@ import com.b2bprocure.system.common.enums.PaymentStatus;
 import com.b2bprocure.system.common.enums.SettingKey;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
+import com.b2bprocure.system.common.util.PriceTierResolver;
 import com.b2bprocure.system.common.util.SecurityUtil;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.order.dto.CheckoutRequest;
@@ -41,7 +42,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -326,18 +326,17 @@ public class CheckoutServiceImpl implements CheckoutService {
                 .build();
     }
 
+    /**
+     * Resolve the unit price for an item using the shared {@link PriceTierResolver}.
+     *
+     * <p>Rule: tiers are matched strictly ({@code min <= quantity <= max}). If
+     * the quantity exceeds the {@code max_quantity} of the last tier, the last
+     * tier's unit price is used as fallback. Quantities below all tiers or
+     * falling in gaps return {@code null}, which the caller translates into a
+     * {@link ErrorCode#NO_MATCHING_PRICE_TIER} error.
+     */
     private BigDecimal calculateUnitPrice(List<ProductPrice> tiers, Integer quantity) {
-        if (tiers == null || tiers.isEmpty() || quantity == null || quantity <= 0) {
-            return null;
-        }
-
-        // Strict tier matching: minQuantity <= quantity <= maxQuantity (maxQuantity can be null for open upper bound)
-        return tiers.stream()
-                .filter(t -> t.getMinQuantity() != null && quantity >= t.getMinQuantity()
-                        && (t.getMaxQuantity() == null || quantity <= t.getMaxQuantity()))
-                .findFirst()
-                .map(ProductPrice::getUnitPrice)
-                .orElse(null);
+        return PriceTierResolver.resolveUnitPrice(tiers, quantity).orElse(null);
     }
 
     private String generateUniqueOrderCode() {

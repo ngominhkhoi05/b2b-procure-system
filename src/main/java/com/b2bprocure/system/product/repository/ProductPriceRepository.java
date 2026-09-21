@@ -24,4 +24,6 @@ public interface ProductPriceRepository extends JpaRepository<ProductPrice, Long
     @Query("SELECT pp FROM ProductPrice pp WHERE pp.product.id IN :productIds ORDER BY pp.minQuantity ASC")
     List<ProductPrice> findByProductIdInOrderByMinQuantityAsc(@Param("productIds") Collection<Long> productIds);
 
+    void deleteByProductId(Long productId);
+
 }

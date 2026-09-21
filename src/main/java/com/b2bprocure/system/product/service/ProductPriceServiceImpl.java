@@ -206,10 +206,24 @@ public class ProductPriceServiceImpl implements ProductPriceService {
         }
 
         List<ProductPrice> prices = productPriceRepository.findByProductIdOrderByMinQuantityAsc(productId);
-        return prices.stream()
-                .filter(p -> p.getMinQuantity() <= quantity && (p.getMaxQuantity() == null || p.getMaxQuantity() >= quantity))
-                .findFirst()
+        return com.b2bprocure.system.common.util.PriceTierResolver
+                .resolveUnitPrice(prices, quantity)
+                .map(price -> findMatchingTier(prices, quantity, price))
                 .map(productPriceMapper::toResponse);
+    }
+
+    /**
+     * Resolve the {@link ProductPrice} tier that corresponds to the unit
+     * price returned by {@link com.b2bprocure.system.common.util.PriceTierResolver}.
+     * If the quantity falls into a gap, prefer the last tier with that price;
+     * if the quantity exceeds the last tier's max, also return the last tier
+     * (which is what the resolver would have used).
+     */
+    private ProductPrice findMatchingTier(List<ProductPrice> prices, int quantity, java.math.BigDecimal price) {
+        return prices.stream()
+                .filter(p -> p.getUnitPrice() != null && p.getUnitPrice().compareTo(price) == 0)
+                .reduce((a, b) -> b) // last tier with matching price
+                .orElse(null);
     }
 
 }
