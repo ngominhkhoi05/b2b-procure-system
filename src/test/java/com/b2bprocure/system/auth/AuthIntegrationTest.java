@@ -103,6 +103,10 @@ public class AuthIntegrationTest {
         for (User user : userRepository.findAll()) {
             if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
                 userRepository.delete(user);
+            } else {
+                user.setPassword(passwordEncoder.encode("password123"));
+                user.setStatus("ACTIVE");
+                userRepository.save(user);
             }
         }
         for (Company company : companyRepository.findAll()) {

@@ -15,4 +15,23 @@ public enum PaymentStatus {
     REFUNDED("Đã hoàn tiền");
 
     private final String description;
+
+    /**
+     * Check if transitioning from current payment status to target status is valid.
+     * Transitions:
+     * PENDING -> SUCCESS, FAILED, EXPIRED
+     * SUCCESS -> REFUND_PENDING
+     * REFUND_PENDING -> REFUNDED
+     */
+    public boolean canTransitionTo(PaymentStatus target) {
+        if (target == null) {
+            return false;
+        }
+        return switch (this) {
+            case PENDING -> target == SUCCESS || target == FAILED || target == EXPIRED;
+            case SUCCESS -> target == REFUND_PENDING;
+            case REFUND_PENDING -> target == REFUNDED;
+            case FAILED, EXPIRED, REFUNDED -> false;
+        };
+    }
 }

@@ -219,3 +219,7 @@ HELP.md
 .copilot/
 AGENTS.md
 PROJECT_STATUS.md
+
+### --- 14. Postman Collections & Environments ---
+*.postman_collection.json
+*.postman_environment.json

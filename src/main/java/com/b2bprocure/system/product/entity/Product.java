@@ -10,6 +10,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -69,6 +71,34 @@ public class Product {
         int stock = stockQuantity != null ? stockQuantity : 0;
         int reserved = reservedQuantity != null ? reservedQuantity : 0;
         return Math.max(0, stock - reserved);
+    }
+
+    public void validateInvariants() {
+        int stock = stockQuantity != null ? stockQuantity : 0;
+        int reserved = reservedQuantity != null ? reservedQuantity : 0;
+        if (stock < 0) {
+            throw new IllegalArgumentException("Stock quantity cannot be negative");
+        }
+        if (reserved < 0) {
+            throw new IllegalArgumentException("Reserved quantity cannot be negative");
+        }
+        if (reserved > stock) {
+            throw new IllegalArgumentException(
+                    String.format("Reserved quantity (%d) cannot exceed stock quantity (%d)", reserved, stock)
+            );
+        }
+    }
+
+    @PrePersist
+    @PreUpdate
+    protected void onPersistOrUpdate() {
+        if (stockQuantity == null) {
+            stockQuantity = 0;
+        }
+        if (reservedQuantity == null) {
+            reservedQuantity = 0;
+        }
+        validateInvariants();
     }
 
 }

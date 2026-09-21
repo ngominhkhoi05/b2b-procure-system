@@ -59,6 +59,12 @@ public class CategoryIntegrationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired(required = false)
+    private com.b2bprocure.system.product.repository.ProductPriceRepository productPriceRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.product.repository.ProductRepository productRepository;
+
     private String adminToken;
     private String buyerToken;
     private String supplierToken;
@@ -74,6 +80,12 @@ public class CategoryIntegrationTest {
                 .build();
 
         if (!initialized) {
+            if (productPriceRepository != null) {
+                productPriceRepository.deleteAll();
+            }
+            if (productRepository != null) {
+                productRepository.deleteAll();
+            }
             categoryRepository.deleteAll();
             initialized = true;
         }
@@ -592,7 +604,17 @@ public class CategoryIntegrationTest {
     }
 
     @AfterAll
-    static void tearDown(@Autowired CategoryRepository categoryRepository) {
+    static void tearDown(
+            @Autowired CategoryRepository categoryRepository,
+            @Autowired(required = false) com.b2bprocure.system.product.repository.ProductPriceRepository productPriceRepository,
+            @Autowired(required = false) com.b2bprocure.system.product.repository.ProductRepository productRepository
+    ) {
+        if (productPriceRepository != null) {
+            productPriceRepository.deleteAll();
+        }
+        if (productRepository != null) {
+            productRepository.deleteAll();
+        }
         categoryRepository.deleteAll();
     }
 

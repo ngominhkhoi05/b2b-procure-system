@@ -13,6 +13,7 @@ import com.b2bprocure.system.user.entity.User;
 import com.b2bprocure.system.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
@@ -753,6 +754,18 @@ public class UserIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.message", containsString("Admin cannot deactivate or block their own account")));
+    }
+
+    @AfterAll
+    static void tearDown(
+            @Autowired UserRepository userRepository,
+            @Autowired PasswordEncoder passwordEncoder
+    ) {
+        userRepository.findByUsername("buyer").ifPresent(buyer -> {
+            buyer.setPassword(passwordEncoder.encode("password123"));
+            buyer.setStatus("ACTIVE");
+            userRepository.save(buyer);
+        });
     }
 
 }
