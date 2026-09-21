@@ -83,6 +83,12 @@ public class AuthIntegrationTest {
     @Autowired
     private OAuth2LinkStateStore oauth2LinkStateStore;
 
+    @Autowired(required = false)
+    private com.b2bprocure.system.cart.repository.CartItemRepository cartItemRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.cart.repository.CartRepository cartRepository;
+
     private static boolean initialized = false;
 
     @BeforeEach
@@ -100,6 +106,12 @@ public class AuthIntegrationTest {
     private void cleanNonSeedTestData() {
         authAccountRepository.deleteAll();
         oauth2LinkStateStore.clearAll();
+        if (cartItemRepository != null) {
+            cartItemRepository.deleteAll();
+        }
+        if (cartRepository != null) {
+            cartRepository.deleteAll();
+        }
         for (User user : userRepository.findAll()) {
             if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
                 userRepository.delete(user);

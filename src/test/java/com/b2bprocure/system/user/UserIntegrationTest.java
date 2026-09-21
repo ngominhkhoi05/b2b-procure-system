@@ -96,7 +96,7 @@ public class UserIntegrationTest {
     }
 
     private User createOrGetTestUser(String username, String email, Role role, Company company, String rawPassword, String status) {
-        return userRepository.findByUsername(username).orElseGet(() -> {
+        return userRepository.findByUsernameWithRoleAndCompany(username).orElseGet(() -> {
             User u = new User();
             u.setUsername(username);
             u.setEmail(email);
