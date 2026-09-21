@@ -18,6 +18,15 @@ spring:
   flyway:
     enabled: true
 
+# CORS override for dev profile: allow Vite (5173), Create React App (3000), and Swagger tools.
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:5173
+      - http://127.0.0.1:3000
+      - http://127.0.0.1:5173
+
 logging:
   file:
     name: app.log

@@ -321,6 +321,7 @@ public class CheckoutServiceImpl implements CheckoutService {
                 .paymentId(payment.getId())
                 .paymentCode(payment.getPaymentCode())
                 .paymentExpiredAt(payment.getExpiredAt())
+                .paymentUrl(null) // For ZaloPay, frontend should call POST /api/v1/checkout/zalopay/create-payment
                 .createdAt(order.getCreatedAt())
                 .build();
     }

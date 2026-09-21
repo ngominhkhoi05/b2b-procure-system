@@ -23,6 +23,7 @@ public final class SecurityConstants {
     // Public URL whitelist
     public static final String[] PUBLIC_URLS = {
             "/api/v1/auth/**",
+            "/api/v1/payments/zalopay/callback",
             "/oauth2/**",
             "/login/oauth2/**",
             "/v3/api-docs/**",

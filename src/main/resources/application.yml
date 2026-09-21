@@ -21,6 +21,21 @@ spring:
 app:
   oauth2:
     authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth2/redirect}
+  cors:
+    # Allowed origins. Supports two binding modes:
+    #   1. YAML list (preferred in dev):
+    #        allowed-origins:
+    #          - http://localhost:3000
+    #          - http://localhost:5173
+    #   2. Comma-separated env var (preferred in prod):
+    #        CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+    # Empty list = no CORS. NEVER use "*" with allowCredentials=true.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+    allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+    allowed-headers: "*"
+    exposed-headers: Authorization,Content-Type,X-Requested-With
+    allow-credentials: true
+    max-age: 3600
 
 server:
   port: 8080
@@ -31,10 +46,16 @@ jwt:
   header: Authorization
   prefix: "Bearer "
 
+zalopay:
+  app-id: ${ZALOPAY_APP_ID:2553}
+  key1: ${ZALOPAY_KEY1:PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL}
+  key2: ${ZALOPAY_KEY2:kLtgPl8HHhfvMuDHPwKfgfsY4Ydm9eIz}
+  endpoint: ${ZALOPAY_ENDPOINT:https://sb-openapi.zalopay.vn/v2/create}
+  callback-url: ${ZALOPAY_CALLBACK_URL:https://panther-flatness-unzip.ngrok-free.dev/callback}
+
 springdoc:
   api-docs:
     path: /v3/api-docs
-
   swagger-ui:
     path: /swagger-ui.html
     tags-sorter: alpha

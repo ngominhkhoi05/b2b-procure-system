@@ -66,6 +66,9 @@ public class Payment {
     @Column(name = "provider_transaction_id")
     private String providerTransactionId;
 
+    @Column(name = "app_trans_id", unique = true, length = 40)
+    private String appTransId;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

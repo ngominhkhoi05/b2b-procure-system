@@ -51,6 +51,9 @@ public class CheckoutResponse {
     @Schema(description = "Expiration timestamp for online payments (null for COD)", example = "2026-09-21T10:15:00")
     private LocalDateTime paymentExpiredAt;
 
+    @Schema(description = "Payment URL for online payments (e.g., ZaloPay). For ZaloPay, call POST /api/v1/checkout/zalopay/create-payment to get the actual URL.", example = "https://...")
+    private String paymentUrl;
+
     @Schema(description = "Timestamp when the order was created")
     private LocalDateTime createdAt;
 

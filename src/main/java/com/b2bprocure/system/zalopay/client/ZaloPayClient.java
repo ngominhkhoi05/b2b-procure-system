@@ -1,0 +1,155 @@
+package com.b2bprocure.system.zalopay.client;
+
+import com.b2bprocure.system.zalopay.config.ZaloPayConfig;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreateOrderResponse;
+import com.b2bprocure.system.zalopay.service.ZaloPaySignatureService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.RestClient;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * HTTP client for communicating with ZaloPay Sandbox API.
+ * Uses Spring RestClient.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class ZaloPayClient {
+
+    private final ZaloPayConfig zaloPayConfig;
+    private final ZaloPaySignatureService signatureService;
+
+    /**
+     * Create a ZaloPay order.
+     *
+     * @param appTransId Unique transaction ID (format: yyMMdd_xxx, max 40 chars)
+     * @param appUser   Username/identifier of the user
+     * @param amount    Amount in VND (long)
+     * @param item      JSON array string of items
+     * @param embedData JSON string of extra data
+     * @param description Description of the order
+     * @return ZaloPayCreateOrderResponse
+     * @throws ZaloPayException if the API call fails
+     */
+    public ZaloPayCreateOrderResponse createOrder(String appTransId, String appUser,
+                                                  long amount, String item,
+                                                  String embedData, String description) {
+        long appTime = System.currentTimeMillis();
+
+        // Build request params
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("app_id", zaloPayConfig.getAppId());
+        params.put("app_trans_id", appTransId);
+        params.put("app_user", appUser);
+        params.put("app_time", appTime);
+        params.put("amount", amount);
+        params.put("item", item);
+        params.put("embed_data", embedData);
+        params.put("description", description);
+        params.put("bank_code", "zalopayapp");
+        params.put("callback_url", zaloPayConfig.getCallbackUrl());
+
+        // Create MAC signature using key1
+        String mac = signatureService.createOrderMac(
+                zaloPayConfig.getAppId(),
+                appTransId,
+                appUser,
+                amount,
+                appTime,
+                embedData,
+                item
+        );
+        params.put("mac", mac);
+
+        log.info("Creating ZaloPay order: appTransId={}, amount={}", appTransId, amount);
+
+        try {
+            RestClient restClient = RestClient.create();
+
+            // ZaloPay expects application/x-www-form-urlencoded
+            String response = restClient.post()
+                    .uri(zaloPayConfig.getEndpoint())
+                    .contentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(buildFormUrlEncoded(params))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError,
+                            (request, response1) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay API client error: " + response1.getStatusCode());
+                            })
+                    .onStatus(HttpStatusCode::is5xxServerError,
+                            (request, response1) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay API server error: " + response1.getStatusCode());
+                            })
+                    .body(String.class);
+
+            log.info("ZaloPay create order response: {}", response);
+
+            ZaloPayCreateOrderResponse parsed = parseResponse(response);
+            return parsed;
+
+        } catch (HttpClientErrorException e) {
+            log.error("ZaloPay API HTTP client error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay API HTTP client error: " + e.getMessage(), e);
+        } catch (HttpServerErrorException e) {
+            log.error("ZaloPay API HTTP server error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay API HTTP server error: " + e.getMessage(), e);
+        } catch (ZaloPayException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ZaloPay API call failed: {}", e.getMessage(), e);
+            throw new ZaloPayException("ZaloPay API call failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Build application/x-www-form-urlencoded body string.
+     */
+    private String buildFormUrlEncoded(Map<String, Object> params) {
+        StringBuilder sb = new StringBuilder();
+        params.forEach((key, value) -> {
+            if (sb.length() > 0) {
+                sb.append("&");
+            }
+            sb.append(urlEncode(key)).append("=").append(urlEncode(String.valueOf(value)));
+        });
+        return sb.toString();
+    }
+
+    /**
+     * Simple URL encoding for form data.
+     */
+    private String urlEncode(String value) {
+        if (value == null) {
+            return "";
+        }
+        try {
+            return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8.toString());
+        } catch (Exception e) {
+            return value;
+        }
+    }
+
+    /**
+     * Parse ZaloPay JSON response.
+     */
+    private ZaloPayCreateOrderResponse parseResponse(String json) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(json, ZaloPayCreateOrderResponse.class);
+        } catch (Exception e) {
+            log.error("Failed to parse ZaloPay response: {}", json, e);
+            throw new ZaloPayException("Failed to parse ZaloPay API response: " + e.getMessage(), e);
+        }
+    }
+}

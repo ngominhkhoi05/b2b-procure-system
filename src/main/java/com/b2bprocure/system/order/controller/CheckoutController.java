@@ -4,6 +4,9 @@ import com.b2bprocure.system.common.response.ApiResponse;
 import com.b2bprocure.system.order.dto.CheckoutRequest;
 import com.b2bprocure.system.order.dto.CheckoutResponse;
 import com.b2bprocure.system.order.service.CheckoutService;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreatePaymentRequest;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreatePaymentResponse;
+import com.b2bprocure.system.zalopay.service.ZaloPayService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class CheckoutController {
 
     private final CheckoutService checkoutService;
+    private final ZaloPayService zaloPayService;
 
     @Operation(
             summary = "Execute Checkout",
@@ -68,4 +72,51 @@ public class CheckoutController {
                 .body(ApiResponse.success("Checkout completed successfully", response));
     }
 
+    @Operation(
+            summary = "Create ZaloPay Payment",
+            description = "Initiates ZaloPay payment for an existing order. " +
+                    "Creates ZaloPay order and returns payment URL for buyer to complete payment. " +
+                    "Step 2 of the two-step ZaloPay checkout flow."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "ZaloPay payment initiated successfully",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid request or ZaloPay order creation failed",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "401",
+                    description = "Unauthorized - Authentication required",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "403",
+                    description = "Forbidden - Order does not belong to current buyer",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "Order or payment not found",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "502",
+                    description = "ZaloPay API unavailable or returned error",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            )
+    })
+    @PostMapping("/zalopay/create-payment")
+    @PreAuthorize("hasRole('BUYER')")
+    public ResponseEntity<ApiResponse<ZaloPayCreatePaymentResponse>> createZaloPayPayment(
+            @Valid @RequestBody ZaloPayCreatePaymentRequest request
+    ) {
+        ZaloPayCreatePaymentResponse response = zaloPayService.initiatePayment(
+                request.getPaymentId(), request.getOrderId());
+        return ResponseEntity.ok(ApiResponse.success("ZaloPay payment initiated", response));
+    }
 }
