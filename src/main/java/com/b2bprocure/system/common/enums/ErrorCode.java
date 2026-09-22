@@ -25,7 +25,8 @@ public enum ErrorCode {
     ZALOPAY_INVALID_SIGNATURE("ZaloPay callback signature invalid", HttpStatus.BAD_REQUEST),
     ZALOPAY_PAYMENT_NOT_FOUND("Payment not found for ZaloPay callback", HttpStatus.NOT_FOUND),
     ZALOPAY_AMOUNT_MISMATCH("ZaloPay callback amount mismatch", HttpStatus.BAD_REQUEST),
-    ZALOPAY_INVALID_RESPONSE("ZaloPay API returned invalid response", HttpStatus.BAD_GATEWAY);
+    ZALOPAY_INVALID_RESPONSE("ZaloPay API returned invalid response", HttpStatus.BAD_GATEWAY),
+    PAYMENT_TIMEOUT_EXPIRED("Payment has expired", HttpStatus.BAD_REQUEST);
 
     private final String defaultMessage;
     private final HttpStatus httpStatus;

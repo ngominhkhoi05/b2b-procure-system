@@ -26,9 +26,17 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Query("SELECT p FROM Payment p WHERE p.appTransId = :appTransId")
     Optional<Payment> findByAppTransIdWithLock(@Param("appTransId") String appTransId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.id = :id")
+    Optional<Payment> findByIdWithLock(@Param("id") Long id);
+
     boolean existsByPaymentCode(String paymentCode);
 
-    @Query("SELECT p FROM Payment p WHERE p.status = :status AND p.paymentMethod != 'COD' AND p.expiredAt < :now")
+    @Query("SELECT p FROM Payment p WHERE p.status = :status AND p.paymentMethod = 'ZALOPAY' AND p.expiredAt <= :now")
     List<Payment> findExpiredPayments(@Param("status") PaymentStatus status, @Param("now") LocalDateTime now);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.status = :status AND p.paymentMethod = 'ZALOPAY' AND p.expiredAt <= :now ORDER BY p.id ASC")
+    List<Payment> findExpiredPaymentsWithLock(@Param("status") PaymentStatus status, @Param("now") LocalDateTime now);
 
 }

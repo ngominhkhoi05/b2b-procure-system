@@ -1,10 +1,13 @@
 package com.b2bprocure.system;
 
 import java.util.TimeZone;
+
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 public class B2bProcureSystemApplication {
 
     public static void main(String[] args) {

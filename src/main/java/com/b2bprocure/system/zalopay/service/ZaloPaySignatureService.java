@@ -50,6 +50,16 @@ public class ZaloPaySignatureService {
     }
 
     /**
+     * Create MAC for ZaloPay query order request.
+     * Input string format: app_id|app_trans_id
+     * Uses key2 for signing.
+     */
+    public String createQueryOrderMac(String appId, String appTransId) {
+        String data = String.format("%s|%s", appId, appTransId);
+        return computeMac(data, zaloPayConfig.getKey2());
+    }
+
+    /**
      * Compute HMAC-SHA256 hex string from data and key.
      */
     private String computeMac(String data, String key) {

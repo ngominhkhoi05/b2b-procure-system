@@ -140,7 +140,77 @@ public class ZaloPayClient {
     }
 
     /**
-     * Parse ZaloPay JSON response.
+     * Query ZaloPay order status.
+     * Uses the query API endpoint to check transaction status.
+     *
+     * @param appId ZaloPay App ID
+     * @param appTransId Transaction ID used when creating the order
+     * @param mac HMAC-SHA256 signature for the query request
+     * @return Map containing ZaloPay response data
+     * @throws ZaloPayException if the API call fails
+     */
+    public Map<String, Object> queryOrderStatus(long appId, String appTransId, String mac) {
+        log.info("Querying ZaloPay order status: appTransId={}", appTransId);
+
+        try {
+            RestClient restClient = RestClient.create();
+
+            String response = restClient.post()
+                    .uri(zaloPayConfig.getQueryEndpoint())
+                    .contentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(buildFormUrlEncoded(Map.of(
+                            "app_id", appId,
+                            "app_trans_id", appTransId,
+                            "mac", mac
+                    )))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError,
+                            (request, resp) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay query API client error: " + resp.getStatusCode());
+                            })
+                    .onStatus(HttpStatusCode::is5xxServerError,
+                            (request, resp) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay query API server error: " + resp.getStatusCode());
+                            })
+                    .body(String.class);
+
+            log.info("ZaloPay query order status response: {}", response);
+
+            return parseQueryResponse(response);
+
+        } catch (HttpClientErrorException e) {
+            log.error("ZaloPay query API HTTP client error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay query API HTTP client error: " + e.getMessage(), e);
+        } catch (HttpServerErrorException e) {
+            log.error("ZaloPay query API HTTP server error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay query API HTTP server error: " + e.getMessage(), e);
+        } catch (ZaloPayException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ZaloPay query API call failed: {}", e.getMessage(), e);
+            throw new ZaloPayException("ZaloPay query API call failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parse query response into a Map.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseQueryResponse(String json) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(json, Map.class);
+        } catch (Exception e) {
+            log.error("Failed to parse ZaloPay query response: {}", json, e);
+            throw new ZaloPayException("Failed to parse ZaloPay query response: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parse ZaloPay JSON response (create order).
      */
     private ZaloPayCreateOrderResponse parseResponse(String json) {
         try {
