@@ -60,6 +60,16 @@ public class ZaloPaySignatureService {
     }
 
     /**
+     * Create MAC for ZaloPay refund request.
+     * Input string format: app_id|zp_trans_id|amount|timestamp|description
+     * Uses key1 for signing.
+     */
+    public String createRefundMac(String appId, String zpTransId, long amount, long timestamp, String description) {
+        String data = String.format("%s|%s|%d|%d|%s", appId, zpTransId, amount, timestamp, description);
+        return computeMac(data, zaloPayConfig.getKey1());
+    }
+
+    /**
      * Compute HMAC-SHA256 hex string from data and key.
      */
     private String computeMac(String data, String key) {

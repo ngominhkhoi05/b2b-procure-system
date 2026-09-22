@@ -52,6 +52,7 @@ zalopay:
   key2: ${ZALOPAY_KEY2:kLtgPl8HHhfvMuDHPwKfgfsY4Ydm9eIz}
   endpoint: ${ZALOPAY_ENDPOINT:https://sb-openapi.zalopay.vn/v2/create}
   query-endpoint: ${ZALOPAY_QUERY_ENDPOINT:https://sb-openapi.zalopay.vn/v2/query}
+  refund-endpoint: ${ZALOPAY_REFUND_ENDPOINT:https://sb-openapi.zalopay.vn/v2/refund}
   callback-url: ${ZALOPAY_CALLBACK_URL:https://panther-flatness-unzip.ngrok-free.dev/api/v1/payments/zalopay/callback}
 
 springdoc:

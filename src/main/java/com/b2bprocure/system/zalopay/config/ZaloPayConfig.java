@@ -17,4 +17,5 @@ public class ZaloPayConfig {
     private String endpoint;
     private String callbackUrl;
     private String queryEndpoint;
+    private String refundEndpoint;
 }

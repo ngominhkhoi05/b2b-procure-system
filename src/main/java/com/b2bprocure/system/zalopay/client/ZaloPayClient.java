@@ -210,6 +210,83 @@ public class ZaloPayClient {
     }
 
     /**
+     * Process ZaloPay refund request.
+     * Uses the refund API endpoint to request refund for a paid transaction.
+     *
+     * @param appId ZaloPay App ID
+     * @param zpTransId ZaloPay transaction ID (zp_trans_id)
+     * @param amount Refund amount in VND
+     * @param description Reason for refund
+     * @param timestamp Request timestamp in milliseconds
+     * @param mac HMAC-SHA256 signature for the refund request
+     * @return Map containing ZaloPay response data
+     * @throws ZaloPayException if the API call fails
+     */
+    public Map<String, Object> refund(long appId, String zpTransId, long amount,
+                                       String description, long timestamp, String mac) {
+        log.info("Processing ZaloPay refund: zpTransId={}, amount={}", zpTransId, amount);
+
+        try {
+            RestClient restClient = RestClient.create();
+
+            String response = restClient.post()
+                    .uri(zaloPayConfig.getRefundEndpoint())
+                    .contentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(buildFormUrlEncoded(Map.of(
+                            "app_id", appId,
+                            "zp_trans_id", zpTransId,
+                            "amount", amount,
+                            "description", description,
+                            "timestamp", timestamp,
+                            "mac", mac
+                    )))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError,
+                            (request, resp) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay refund API client error: " + resp.getStatusCode());
+                            })
+                    .onStatus(HttpStatusCode::is5xxServerError,
+                            (request, resp) -> {
+                                throw new ZaloPayException(
+                                        "ZaloPay refund API server error: " + resp.getStatusCode());
+                            })
+                    .body(String.class);
+
+            log.info("ZaloPay refund response: {}", response);
+
+            return parseRefundResponse(response);
+
+        } catch (HttpClientErrorException e) {
+            log.error("ZaloPay refund API HTTP client error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay refund API HTTP client error: " + e.getMessage(), e);
+        } catch (HttpServerErrorException e) {
+            log.error("ZaloPay refund API HTTP server error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new ZaloPayException("ZaloPay refund API HTTP server error: " + e.getMessage(), e);
+        } catch (ZaloPayException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ZaloPay refund API call failed: {}", e.getMessage(), e);
+            throw new ZaloPayException("ZaloPay refund API call failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parse refund response into a Map.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseRefundResponse(String json) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(json, Map.class);
+        } catch (Exception e) {
+            log.error("Failed to parse ZaloPay refund response: {}", json, e);
+            throw new ZaloPayException("Failed to parse ZaloPay refund response: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Parse ZaloPay JSON response (create order).
      */
     private ZaloPayCreateOrderResponse parseResponse(String json) {

@@ -39,4 +39,18 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Query("SELECT p FROM Payment p WHERE p.status = :status AND p.paymentMethod = 'ZALOPAY' AND p.expiredAt <= :now ORDER BY p.id ASC")
     List<Payment> findExpiredPaymentsWithLock(@Param("status") PaymentStatus status, @Param("now") LocalDateTime now);
 
+    /**
+     * Find ZaloPay payments eligible for supplier confirmation timeout (paid orders).
+     * Only payments with status SUCCESS and paidAt <= deadline are eligible.
+     *
+     * @param status Payment status (SUCCESS)
+     * @param deadline Payments paid before or at this deadline have expired
+     * @return List of payments eligible for supplier timeout processing
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p JOIN FETCH p.order o WHERE p.status = :status AND p.paidAt IS NOT NULL AND p.paidAt <= :deadline ORDER BY p.id ASC")
+    List<Payment> findPaidZaloPayPaymentsForTimeout(
+            @Param("status") PaymentStatus status,
+            @Param("deadline") LocalDateTime deadline);
+
 }

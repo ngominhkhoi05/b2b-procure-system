@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -36,5 +38,20 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     Page<Order> findBySupplierCompanyId(Long supplierCompanyId, Pageable pageable);
 
     Page<Order> findByStatus(OrderStatus status, Pageable pageable);
+
+    /**
+     * Find COD orders eligible for supplier confirmation timeout processing.
+     * COD orders: PENDING_CONFIRMATION where createdAt <= deadline (meaning expired)
+     *
+     * @param status Only look for orders with this status (PENDING_CONFIRMATION)
+     * @param deadline Orders created before or at this deadline have expired
+     * @return List of COD orders that have exceeded their supplier confirmation deadline
+     */
+    @Query("SELECT o FROM Order o " +
+            "WHERE o.status = :status AND o.createdAt <= :deadline " +
+            "ORDER BY o.id ASC")
+    List<Order> findExpiredCodOrders(
+            @Param("status") OrderStatus status,
+            @Param("deadline") LocalDateTime deadline);
 
 }
