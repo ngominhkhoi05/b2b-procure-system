@@ -29,7 +29,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,33 +55,19 @@ public class CartServiceImpl implements CartService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
     }
 
+    /**
+     * Resolve the unit price for a cart item using the shared
+     * {@link com.b2bprocure.system.common.util.PriceTierResolver}.
+     *
+     * <p>Falls back to the LAST tier's unit price when the quantity exceeds
+     * the last tier's {@code max_quantity}. Returns {@code null} when the
+     * quantity is below all tiers or falls into a gap between tiers; in those
+     * cases the cart response will expose {@code unitPrice=null} and
+     * {@code available=false}.
+     */
     private BigDecimal calculateUnitPrice(List<ProductPrice> tiers, Integer quantity) {
-        if (tiers == null || tiers.isEmpty() || quantity == null || quantity <= 0) {
-            return null;
-        }
-
-        // Bước 1: Tìm ProductPrice tier chính xác chứa quantity
-        Optional<ProductPrice> exactTier = tiers.stream()
-                .filter(t -> t.getMinQuantity() != null && quantity >= t.getMinQuantity()
-                        && (t.getMaxQuantity() == null || quantity <= t.getMaxQuantity()))
-                .findFirst();
-
-        if (exactTier.isPresent()) {
-            return exactTier.get().getUnitPrice();
-        }
-
-        // Bước 2: Nếu không tìm thấy vì quantity vượt quá max_quantity của tier cuối cùng:
-        // Lấy tier cuối cùng của Product (xác định theo minQuantity lớn nhất)
-        ProductPrice lastTier = tiers.stream()
-                .filter(t -> t.getMinQuantity() != null)
-                .max(Comparator.comparing(ProductPrice::getMinQuantity))
-                .orElse(null);
-
-        if (lastTier != null && lastTier.getMaxQuantity() != null && quantity > lastTier.getMaxQuantity()) {
-            return lastTier.getUnitPrice();
-        }
-
-        return null;
+        return com.b2bprocure.system.common.util.PriceTierResolver
+                .resolveUnitPrice(tiers, quantity).orElse(null);
     }
 
     private boolean isAvailable(Product product, Integer quantity) {

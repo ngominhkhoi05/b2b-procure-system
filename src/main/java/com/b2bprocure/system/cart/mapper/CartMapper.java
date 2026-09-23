@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 @Mapper(componentModel = "spring")
 public interface CartMapper {
 
+    @Mapping(target = "id", source = "cartItem.id")
     @Mapping(target = "productId", source = "cartItem.product.id")
     @Mapping(target = "sku", source = "cartItem.product.sku")
     @Mapping(target = "productName", source = "cartItem.product.name")

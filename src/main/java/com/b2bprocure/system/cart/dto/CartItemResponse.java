@@ -17,6 +17,9 @@ import java.math.BigDecimal;
 @Schema(description = "Cart item response with dynamically calculated price and availability")
 public class CartItemResponse {
 
+    @Schema(description = "Cart Item ID", example = "1")
+    private Long id;
+
     @Schema(description = "Product ID", example = "10")
     private Long productId;
 

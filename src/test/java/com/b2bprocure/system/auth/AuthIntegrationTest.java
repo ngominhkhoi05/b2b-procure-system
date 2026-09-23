@@ -83,6 +83,30 @@ public class AuthIntegrationTest {
     @Autowired
     private OAuth2LinkStateStore oauth2LinkStateStore;
 
+    @Autowired(required = false)
+    private com.b2bprocure.system.cart.repository.CartItemRepository cartItemRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.cart.repository.CartRepository cartRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.product.repository.ProductRepository productRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.product.repository.ProductPriceRepository productPriceRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.order.repository.OrderRepository orderRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.order.repository.OrderItemRepository orderItemRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.order.repository.OrderStatusHistoryRepository orderStatusHistoryRepository;
+
+    @Autowired(required = false)
+    private com.b2bprocure.system.payment.repository.PaymentRepository paymentRepository;
+
     private static boolean initialized = false;
 
     @BeforeEach
@@ -98,11 +122,41 @@ public class AuthIntegrationTest {
     }
 
     private void cleanNonSeedTestData() {
+        // Delete in FK-safe order: children first, parents last.
+        // payments -> order status history -> order items -> orders -> products/users/companies
+        if (paymentRepository != null) {
+            paymentRepository.deleteAll();
+        }
+        if (orderStatusHistoryRepository != null) {
+            orderStatusHistoryRepository.deleteAll();
+        }
+        if (orderItemRepository != null) {
+            orderItemRepository.deleteAll();
+        }
+        if (orderRepository != null) {
+            orderRepository.deleteAll();
+        }
         authAccountRepository.deleteAll();
         oauth2LinkStateStore.clearAll();
+        if (cartItemRepository != null) {
+            cartItemRepository.deleteAll();
+        }
+        if (cartRepository != null) {
+            cartRepository.deleteAll();
+        }
+        if (productPriceRepository != null) {
+            productPriceRepository.deleteAll();
+        }
+        if (productRepository != null) {
+            productRepository.deleteAll();
+        }
         for (User user : userRepository.findAll()) {
             if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
                 userRepository.delete(user);
+            } else {
+                user.setPassword(passwordEncoder.encode("password123"));
+                user.setStatus("ACTIVE");
+                userRepository.save(user);
             }
         }
         for (Company company : companyRepository.findAll()) {
