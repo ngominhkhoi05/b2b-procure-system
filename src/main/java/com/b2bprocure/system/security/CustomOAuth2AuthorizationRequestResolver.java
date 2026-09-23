@@ -8,6 +8,9 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Slf4j
 public class CustomOAuth2AuthorizationRequestResolver implements OAuth2AuthorizationRequestResolver {
 
@@ -51,6 +54,21 @@ public class CustomOAuth2AuthorizationRequestResolver implements OAuth2Authoriza
                     .redirectUri(fixedRedirectUri)
                     .build();
         }
+
+        // Force prompt=select_account consent on every authorization so that
+        // (a) the user can always pick which Google account to use, and
+        // (b) Google issues a FRESH id_token instead of a cached one that
+        //     may already be expired by the time the Spring provider
+        //     validates the claim timestamps.
+        // The default behaviour reuses cached tokens (prompt=none), which
+        // has been observed to fail Nimbus' id_token validation with
+        // "The ID Token contains invalid claims" when the cached iat is
+        // far in the past relative to the server clock.
+        Map<String, Object> extraParams = new HashMap<>(authRequest.getAdditionalParameters());
+        extraParams.put("prompt", "select_account");
+        authRequest = OAuth2AuthorizationRequest.from(authRequest)
+                .additionalParameters(extraParams)
+                .build();
 
         String action = request.getParameter("action");
         String flow = request.getParameter("flow");
