@@ -11,6 +11,7 @@ import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
 import com.b2bprocure.system.common.response.PageResponse;
 import com.b2bprocure.system.common.util.SecurityUtil;
+import com.b2bprocure.system.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -30,6 +31,7 @@ public class CategoryServiceImpl implements CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final CategoryMapper categoryMapper;
+    private final ProductRepository productRepository;
 
     @Override
     @Transactional
@@ -172,6 +174,29 @@ public class CategoryServiceImpl implements CategoryService {
         Category savedCategory = categoryRepository.save(category);
         log.info("Category status updated to {} for id: {}", normalizedStatus, savedCategory.getId());
         return categoryMapper.toResponse(savedCategory);
+    }
+
+    @Override
+    @Transactional
+    public void deleteCategory(Long id) {
+        if (!SecurityUtil.isAdmin()) {
+            throw new AccessDeniedException("Access denied: Only administrators can delete categories");
+        }
+
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Category", "id", id));
+
+        // Hard delete disallowed when products reference the category.
+        // Existing OrderItems are not affected (no FK cascade, products snapshot name).
+        if (productRepository.existsByCategoryId(id)) {
+            throw new BusinessException(
+                    "Cannot delete category '" + category.getName() + "' because one or more products still reference it",
+                    HttpStatus.CONFLICT
+            );
+        }
+
+        categoryRepository.deleteById(id);
+        log.info("Category deleted successfully with id: {}", id);
     }
 
 }

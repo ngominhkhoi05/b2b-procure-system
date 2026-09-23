@@ -58,4 +58,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             Pageable pageable
     );
 
+    /**
+     * Step 8 — Admin Company Detail: count products belonging to a supplier company.
+     */
+    long countBySupplierCompanyId(Long supplierCompanyId);
+
+    /**
+     * Step 8 — Admin Category Delete: check if any product references this category.
+     */
+    boolean existsByCategoryId(Long categoryId);
 }

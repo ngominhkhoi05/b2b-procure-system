@@ -130,4 +130,51 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             Pageable pageable
     );
 
+    // =========================================================================
+    // Step 8 — Admin Statistics
+    // =========================================================================
+
+    /**
+     * Aggregate count of orders with the given optional status filter within the
+     * optional createdAt range. When both date params are null, counts all records.
+     *
+     * <p>Used by Admin Statistics to compute per-status counts (total + status
+     * breakdown) with a single SQL query per call.
+     */
+    @Query("""
+        SELECT COUNT(o) FROM Order o
+        WHERE (CAST(:status AS string) IS NULL OR o.status = :status)
+          AND (CAST(:fromDate AS timestamp) IS NULL OR o.createdAt >= :fromDate)
+          AND (CAST(:toDateExclusive AS timestamp) IS NULL OR o.createdAt < :toDateExclusive)
+        """)
+    long countByStatusAndDateRange(
+            @Param("status") OrderStatus status,
+            @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDateExclusive") LocalDateTime toDateExclusive
+    );
+
+    /**
+     * Aggregate of financial metrics over a date range, computed from order snapshots.
+     * Uses {@code COALESCE(..., 0)} so rows with no commission snapshot (only PRE-COMPLETED
+     * states) return 0 rather than null.
+     *
+     * <p>Sum is computed over orders in the given set of statuses (typically just
+     * {@code COMPLETED}). If statuses is null/empty, all matching orders are summed.
+     * Commission snapshot sum is null-safe: only COMPLETED orders have commission_amount set.
+     */
+    @Query(value = """
+        SELECT
+          COALESCE(SUM(o.subtotal), 0) AS totalOrderValue,
+          COALESCE(SUM(o.commissionAmount), 0) AS totalCommission
+        FROM Order o
+        WHERE o.status IN :statuses
+          AND (CAST(:fromDate AS timestamp) IS NULL OR o.createdAt >= :fromDate)
+          AND (CAST(:toDateExclusive AS timestamp) IS NULL OR o.createdAt < :toDateExclusive)
+        """)
+    Object[] sumFinancialsByStatusesAndDateRange(
+            @Param("statuses") java.util.Collection<OrderStatus> statuses,
+            @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDateExclusive") LocalDateTime toDateExclusive
+    );
+
 }

@@ -1,5 +1,6 @@
 package com.b2bprocure.system.company.service;
 
+import com.b2bprocure.system.admin.dto.AdminCompanyResponse;
 import com.b2bprocure.system.common.constant.SecurityConstants;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
@@ -12,6 +13,7 @@ import com.b2bprocure.system.company.dto.UpdateCompanyRequest;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.mapper.CompanyMapper;
 import com.b2bprocure.system.company.repository.CompanyRepository;
+import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.user.entity.User;
 import com.b2bprocure.system.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,7 @@ public class CompanyServiceImpl implements CompanyService {
 
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
+    private final ProductRepository productRepository;
     private final CompanyMapper companyMapper;
 
     private User getCurrentAuthenticatedUser() {
@@ -74,6 +77,38 @@ public class CompanyServiceImpl implements CompanyService {
                 .orElseThrow(() -> new ResourceNotFoundException("Company", "id", id));
 
         return companyMapper.toResponse(company);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AdminCompanyResponse getCompanyByIdForAdmin(Long id) {
+        User currentUser = getCurrentAuthenticatedUser();
+        String roleName = currentUser.getRole() != null ? currentUser.getRole().getName() : "";
+        if (!SecurityConstants.ROLE_ADMIN.equalsIgnoreCase(roleName)) {
+            throw new AccessDeniedException("Access denied: Only administrators can access this endpoint");
+        }
+
+        Company company = companyRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Company", "id", id));
+
+        CompanyResponse base = companyMapper.toResponse(company);
+        long userCount = userRepository.countByCompanyId(id);
+        long productCount = productRepository.countBySupplierCompanyId(id);
+
+        return AdminCompanyResponse.builder()
+                .id(base.getId())
+                .name(base.getName())
+                .taxCode(base.getTaxCode())
+                .email(base.getEmail())
+                .phone(base.getPhone())
+                .address(base.getAddress())
+                .companyType(base.getCompanyType())
+                .status(base.getStatus())
+                .createdAt(base.getCreatedAt())
+                .updatedAt(base.getUpdatedAt())
+                .userCount(userCount)
+                .productCount(productCount)
+                .build();
     }
 
     @Override
