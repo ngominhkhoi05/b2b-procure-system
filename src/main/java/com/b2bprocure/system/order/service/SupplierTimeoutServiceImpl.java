@@ -63,6 +63,7 @@ public class SupplierTimeoutServiceImpl implements SupplierTimeoutService {
      * - ZaloPay: payment.paidAt + SUPPLIER_CONFIRM_TIMEOUT_HOURS
      */
     @Scheduled(fixedRate = 300000) // 5 minutes
+    @Transactional
     @Override
     public void processSupplierTimeouts() {
         log.info("Starting supplier timeout processing");
