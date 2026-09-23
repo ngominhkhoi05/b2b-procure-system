@@ -54,4 +54,80 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("status") OrderStatus status,
             @Param("deadline") LocalDateTime deadline);
 
+    /**
+     * Role-aware Order list query for Order History / Query.
+     *
+     * Visibility is enforced entirely at the SQL layer (per Step 7 spec §11):
+     * <ul>
+     *   <li>BUYER  → filter by {@code createdBy.id = :buyerUserId} OR {@code buyerCompany.id = :buyerCompanyId}</li>
+     *   <li>SUPPLIER → filter by {@code EXISTS (OrderItem → Product.supplier_company_id = :supplierCompanyId)}</li>
+     *   <li>ADMIN → all parameters null → no visibility restriction</li>
+     * </ul>
+     *
+     * The query uses an explicit {@code LEFT JOIN Payment pay ON pay.order = o} to load payment
+     * data in a single SQL roundtrip (avoids N+1 for the list). Payment fields are NOT mapped
+     * to the {@code Order} entity (no association) — service composes the response by hand.
+     */
+    @Query(value = """
+            SELECT DISTINCT o FROM Order o
+            JOIN FETCH o.buyerCompany
+            JOIN FETCH o.supplierCompany
+            LEFT JOIN com.b2bprocure.system.payment.entity.Payment pay ON pay.order = o
+            WHERE
+              (CAST(:status AS string) IS NULL OR o.status = :status)
+              AND (CAST(:paymentMethod AS string) IS NULL OR pay.paymentMethod = :paymentMethod)
+              AND (CAST(:paymentStatus AS string) IS NULL OR pay.status = :paymentStatus)
+              AND (CAST(:fromDate AS timestamp) IS NULL OR o.createdAt >= :fromDate)
+              AND (CAST(:toDateExclusive AS timestamp) IS NULL OR o.createdAt < :toDateExclusive)
+              AND (
+                CAST(:buyerUserId AS string) IS NULL
+                OR CAST(:buyerCompanyId AS string) IS NULL
+                OR o.createdBy.id = :buyerUserId
+                OR o.buyerCompany.id = :buyerCompanyId
+              )
+              AND (
+                CAST(:supplierCompanyId AS string) IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM OrderItem oi
+                  WHERE oi.order = o
+                    AND oi.product.supplierCompany.id = :supplierCompanyId
+                )
+              )
+            """,
+           countQuery = """
+            SELECT COUNT(DISTINCT o) FROM Order o
+            LEFT JOIN com.b2bprocure.system.payment.entity.Payment pay ON pay.order = o
+            WHERE
+              (CAST(:status AS string) IS NULL OR o.status = :status)
+              AND (CAST(:paymentMethod AS string) IS NULL OR pay.paymentMethod = :paymentMethod)
+              AND (CAST(:paymentStatus AS string) IS NULL OR pay.status = :paymentStatus)
+              AND (CAST(:fromDate AS timestamp) IS NULL OR o.createdAt >= :fromDate)
+              AND (CAST(:toDateExclusive AS timestamp) IS NULL OR o.createdAt < :toDateExclusive)
+              AND (
+                CAST(:buyerUserId AS string) IS NULL
+                OR CAST(:buyerCompanyId AS string) IS NULL
+                OR o.createdBy.id = :buyerUserId
+                OR o.buyerCompany.id = :buyerCompanyId
+              )
+              AND (
+                CAST(:supplierCompanyId AS string) IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM OrderItem oi
+                  WHERE oi.order = o
+                    AND oi.product.supplierCompany.id = :supplierCompanyId
+                )
+              )
+            """)
+    Page<Order> searchOrders(
+            @Param("status") OrderStatus status,
+            @Param("paymentMethod") com.b2bprocure.system.common.enums.PaymentMethod paymentMethod,
+            @Param("paymentStatus") com.b2bprocure.system.common.enums.PaymentStatus paymentStatus,
+            @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDateExclusive") LocalDateTime toDateExclusive,
+            @Param("buyerUserId") Long buyerUserId,
+            @Param("buyerCompanyId") Long buyerCompanyId,
+            @Param("supplierCompanyId") Long supplierCompanyId,
+            Pageable pageable
+    );
+
 }

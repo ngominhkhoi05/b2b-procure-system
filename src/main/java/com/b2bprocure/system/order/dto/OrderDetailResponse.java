@@ -35,4 +35,22 @@ public class OrderDetailResponse {
     private List<OrderItemResponse> items;
     private List<OrderStatusHistoryResponse> statusHistory;
 
+    /**
+     * Payment summary for this order. Populated by service from
+     * {@code PaymentRepository.findByOrderId(...)}.
+     */
+    private PaymentSummaryResponse payment;
+
+    /**
+     * Buyer company display name (snapshot from {@code Order.buyerCompany}).
+     * Set explicitly in service to avoid touching lazy associations inside mapper.
+     */
+    private String buyerCompanyName;
+
+    /**
+     * Supplier company display name (snapshot from {@code Order.supplierCompany}).
+     * Set explicitly in service to avoid touching lazy associations inside mapper.
+     */
+    private String supplierCompanyName;
+
 }

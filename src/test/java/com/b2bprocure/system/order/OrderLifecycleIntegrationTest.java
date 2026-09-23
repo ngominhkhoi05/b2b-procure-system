@@ -602,10 +602,10 @@ public class OrderLifecycleIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)));
 
-        // 3. Unrelated Buyer cannot access order detail
+        // 3. Unrelated Buyer cannot access order detail — returns 404 (Step 7 spec §7.2: do NOT leak existence)
         mockMvc.perform(get("/api/v1/orders/" + order.getId())
                         .header("Authorization", "Bearer " + buyer2Token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isNotFound());
     }
 
     // =========================================================================

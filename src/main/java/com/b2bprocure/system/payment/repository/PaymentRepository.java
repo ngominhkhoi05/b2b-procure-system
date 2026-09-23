@@ -18,6 +18,16 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     Optional<Payment> findByOrderId(Long orderId);
 
+    /**
+     * Step 7 — Batch-fetch Payments by order IDs in a single SQL roundtrip.
+     * Used by {@code OrderLifecycleServiceImpl.getOrders(...)} to populate
+     * {@code OrderResponse.paymentMethod} / {@code paymentStatus} without N+1.
+     *
+     * Each Order has at most one Payment (unique constraint on {@code order_id}).
+     */
+    @Query("SELECT p FROM Payment p WHERE p.order.id IN :orderIds")
+    List<Payment> findAllByOrderIdIn(@Param("orderIds") java.util.Collection<Long> orderIds);
+
     Optional<Payment> findByPaymentCode(String paymentCode);
 
     Optional<Payment> findByAppTransId(String appTransId);

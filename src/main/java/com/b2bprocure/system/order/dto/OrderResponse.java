@@ -32,4 +32,16 @@ public class OrderResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    /**
+     * Payment method for this order (e.g. COD, ZALOPAY).
+     * Populated by service from the joined Payment to avoid N+1.
+     */
+    private String paymentMethod;
+
+    /**
+     * Payment status for this order (e.g. PENDING, SUCCESS).
+     * Populated by service from the joined Payment to avoid N+1.
+     */
+    private String paymentStatus;
+
 }

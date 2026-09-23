@@ -6,6 +6,7 @@ import com.b2bprocure.system.common.enums.PaymentMethod;
 import com.b2bprocure.system.common.enums.PaymentStatus;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
+import com.b2bprocure.system.common.response.PageResponse;
 import com.b2bprocure.system.common.util.SecurityUtil;
 import com.b2bprocure.system.commission.entity.CommissionRate;
 import com.b2bprocure.system.commission.service.CommissionRateQueryService;
@@ -15,6 +16,7 @@ import com.b2bprocure.system.order.dto.OrderDetailResponse;
 import com.b2bprocure.system.order.dto.OrderItemResponse;
 import com.b2bprocure.system.order.dto.OrderResponse;
 import com.b2bprocure.system.order.dto.OrderStatusHistoryResponse;
+import com.b2bprocure.system.order.dto.PaymentSummaryResponse;
 import com.b2bprocure.system.order.dto.RejectOrderRequest;
 import com.b2bprocure.system.order.entity.Order;
 import com.b2bprocure.system.order.entity.OrderItem;
@@ -22,6 +24,7 @@ import com.b2bprocure.system.order.entity.OrderStatusHistory;
 import com.b2bprocure.system.order.mapper.OrderItemMapper;
 import com.b2bprocure.system.order.mapper.OrderMapper;
 import com.b2bprocure.system.order.mapper.OrderStatusHistoryMapper;
+import com.b2bprocure.system.order.mapper.PaymentSummaryMapper;
 import com.b2bprocure.system.order.repository.OrderItemRepository;
 import com.b2bprocure.system.order.repository.OrderRepository;
 import com.b2bprocure.system.order.repository.OrderStatusHistoryRepository;
@@ -33,12 +36,16 @@ import com.b2bprocure.system.user.entity.User;
 import com.b2bprocure.system.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +56,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderLifecycleServiceImpl implements OrderLifecycleService {
 
+    /**
+     * Maximum page size allowed for Order History / Query list endpoint.
+     * Requests with larger size are clamped to this value (Step 7 spec §4.1).
+     */
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
@@ -58,6 +71,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final OrderStatusHistoryMapper orderStatusHistoryMapper;
+    private final PaymentSummaryMapper paymentSummaryMapper;
     private final CommissionRateQueryService commissionRateQueryService;
 
     @Override
@@ -390,13 +404,30 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
         return orderMapper.toResponse(order);
     }
 
+    /**
+     * Step 7 — Order Detail with pay-attention-to-404 behavior.
+     *
+     * Per spec §7.2: do NOT leak the existence of an Order a user cannot access.
+     * If {@code validateOrderAccess} throws {@link AccessDeniedException}, we
+     * translate it into {@link ResourceNotFoundException} (which {@code GlobalExceptionHandler}
+     * renders as HTTP 404). Note: this differs from Step 6 lifecycle APIs which return 403 for
+     * unauthorized action attempts on accessible orders — those are write operations and DO
+     * benefit from returning 403 to discriminate "exists but you cannot do this"; here we
+     * are doing a read, and we deliberately hide existence.
+     */
     @Override
     @Transactional(readOnly = true)
     public OrderDetailResponse getOrderDetail(Long orderId) {
         Order order = orderRepository.findByIdWithDetails(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
 
-        validateOrderAccess(order);
+        try {
+            validateOrderAccess(order);
+        } catch (AccessDeniedException ex) {
+            // Translate to 404 to avoid leaking order existence (spec §7.2).
+            log.info("Order detail access denied for orderId={} → 404 to avoid existence leak", orderId);
+            throw new ResourceNotFoundException("Order", "id", orderId);
+        }
 
         List<OrderItem> items = orderItemRepository.findByOrderIdWithProduct(order.getId());
         List<OrderItemResponse> itemResponses = orderItemMapper.toResponseList(items);
@@ -404,7 +435,23 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
         List<OrderStatusHistory> histories = orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(order.getId());
         List<OrderStatusHistoryResponse> historyResponses = orderStatusHistoryMapper.toResponseList(histories);
 
-        return orderMapper.toDetailResponse(order, itemResponses, historyResponses);
+        // Payment summary (read once, joined). May be missing — checked is acceptable.
+        PaymentSummaryResponse paymentSummary = paymentRepository.findByOrderId(order.getId())
+                .map(paymentSummaryMapper::toResponse)
+                .orElse(null);
+
+        // Company display names: filled from the fetch-joined entities (zero extra queries).
+        String buyerCompanyName = order.getBuyerCompany() != null ? order.getBuyerCompany().getName() : null;
+        String supplierCompanyName = order.getSupplierCompany() != null ? order.getSupplierCompany().getName() : null;
+
+        return orderMapper.toDetailResponse(
+                order,
+                itemResponses,
+                historyResponses,
+                paymentSummary,
+                buyerCompanyName,
+                supplierCompanyName
+        );
     }
 
     @Override
@@ -420,8 +467,153 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     }
 
     // =========================================================================
+    // STEP 7 — Order History / Order Query (LIST)
+    // =========================================================================
+
+    /**
+     * Step 7 — paginated, filtered list of Orders visible to the currently authenticated principal.
+     *
+     * <h3>Visibility strategy</h3>
+     * <ul>
+     *   <li>BUYER  → Service passes {@code buyerUserId} and {@code buyerCompanyId} derived from
+     *                   {@code SecurityUtil} + user lookup. SQL filters by
+     *                   {@code createdBy.id = buyerUserId OR buyerCompany.id = buyerCompanyId}.</li>
+     *   <li>SUPPLIER → Service passes {@code supplierCompanyId} derived from the user lookup. SQL
+     *                     filters by {@code EXISTS (OrderItem → Product.supplier_company_id = :supplierCompanyId)}.</li>
+     *   <li>ADMIN → All visibility parameters null → no SQL visibility filter.</li>
+     * </ul>
+     *
+     * <h3>Pagination</h3>
+     * {@link Pageable} clamped to {@code MAX_PAGE_SIZE=100} (spec §4.1). Default sort applied at
+     * controller layer: {@code createdAt DESC}.
+     *
+     * <h3>N+1 avoidance</h3>
+     * {@code searchOrders} uses {@code JOIN FETCH buyerCompany / supplierCompany} and
+     * {@code LEFT JOIN Payment}. Each page is exactly 2 SQL queries (data + count). After the
+     * page is loaded, only the {@link Order.buyerCompany} association is touched (to fetch
+     * display name) — and only when needed (for Admin / for detail). For list responses we
+     * deliberately do not dereference lazy associations, so there is no N+1.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<OrderResponse> getOrders(
+            String status,
+            String paymentMethod,
+            String paymentStatus,
+            LocalDate fromDate,
+            LocalDate toDate,
+            Pageable pageable) {
+
+        // 1. Validate + normalize enum filters at the boundary; throw 400 on bad input.
+        OrderStatus statusEnum = parseEnum(OrderStatus.class, status, "status");
+        PaymentMethod paymentMethodEnum = parseEnum(PaymentMethod.class, paymentMethod, "paymentMethod");
+        PaymentStatus paymentStatusEnum = parseEnum(PaymentStatus.class, paymentStatus, "paymentStatus");
+
+        // 2. Validate date range.
+        if (fromDate != null && toDate != null && fromDate.isAfter(toDate)) {
+            throw new BusinessException("fromDate must be on or before toDate", org.springframework.http.HttpStatus.BAD_REQUEST);
+        }
+
+        // 3. Date semantics: fromDate inclusive start-of-day, toDate extended to next-day start (exclusive).
+        LocalDateTime fromDateTime = (fromDate != null) ? fromDate.atStartOfDay() : null;
+        LocalDateTime toDateExclusive = (toDate != null) ? toDate.plusDays(1).atStartOfDay() : null;
+
+        // 4. Resolve role-aware visibility parameters from the authenticated principal.
+        //    These are NEVER taken from request — only from SecurityContext + DB lookup.
+        Long buyerUserId = null;
+        Long buyerCompanyId = null;
+        Long supplierCompanyId = null;
+
+        if (SecurityUtil.isBuyer()) {
+            Long currentUserId = SecurityUtil.getCurrentUserIdOrThrow();
+            User user = userRepository.findByIdWithRoleAndCompany(currentUserId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", currentUserId));
+            buyerUserId = user.getId();
+            if (user.getCompany() != null) {
+                buyerCompanyId = user.getCompany().getId();
+            }
+        } else if (SecurityUtil.isSupplier()) {
+            Long currentUserId = SecurityUtil.getCurrentUserIdOrThrow();
+            User user = userRepository.findByIdWithRoleAndCompany(currentUserId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", currentUserId));
+            if (user.getCompany() != null) {
+                supplierCompanyId = user.getCompany().getId();
+            } else {
+                throw new AccessDeniedException("Access denied: Supplier user does not belong to any supplier company");
+            }
+        } else if (!SecurityUtil.isAdmin()) {
+            // Defensive — controller @PreAuthorize already restricts roles.
+            throw new AccessDeniedException("Access denied: Caller has no Order History role");
+        }
+
+        // 5. Clamp page size per spec §4.1.
+        int requestedSize = pageable.getPageSize();
+        int effectiveSize = requestedSize > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : Math.max(requestedSize, 1);
+        Pageable effectivePageable = (effectiveSize == requestedSize)
+                ? pageable
+                : PageRequest.of(pageable.getPageNumber(), effectiveSize, pageable.getSort());
+
+        // 6. Execute role-aware query.
+        Page<Order> page = orderRepository.searchOrders(
+                statusEnum,
+                paymentMethodEnum,
+                paymentStatusEnum,
+                fromDateTime,
+                toDateExclusive,
+                buyerUserId,
+                buyerCompanyId,
+                supplierCompanyId,
+                effectivePageable
+        );
+
+        // 7. Map Page<Order> → Page<OrderResponse>. Composer sets paymentMethod + paymentStatus
+        //    via a single batched Payment lookup (1 SQL, not N). We deliberately do NOT touch
+        //    buyerCompany / supplierCompany lazy associations inside the loop.
+        List<Long> orderIds = page.getContent().stream().map(Order::getId).toList();
+        Map<Long, Payment> paymentByOrderId = orderIds.isEmpty()
+                ? Map.of()
+                : paymentRepository.findAllByOrderIdIn(orderIds).stream()
+                        .collect(Collectors.toMap(p -> p.getOrder().getId(), p -> p, (a, b) -> a));
+
+        List<OrderResponse> content = page.getContent().stream().map(o -> {
+            OrderResponse r = orderMapper.toResponse(o);
+            Payment p = paymentByOrderId.get(o.getId());
+            if (p != null) {
+                r.setPaymentMethod(p.getPaymentMethod() != null ? p.getPaymentMethod().name() : null);
+                r.setPaymentStatus(p.getStatus() != null ? p.getStatus().name() : null);
+            }
+            return r;
+        }).toList();
+
+        return PageResponse.of(page, content);
+    }
+
+    // =========================================================================
     // HELPER METHODS
     // =========================================================================
+
+    /**
+     * Parse a String filter into an enum value, or return {@code null} when the filter is
+     * not provided. Throws {@link BusinessException} with HTTP 400 for invalid values.
+     */
+    private <E extends Enum<E>> E parseEnum(Class<E> type, String raw, String filterName) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, raw.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            StringBuilder allowed = new StringBuilder();
+            for (Object constant : type.getEnumConstants()) {
+                if (allowed.length() > 0) allowed.append(", ");
+                allowed.append(((Enum<?>) constant).name());
+            }
+            throw new BusinessException(
+                    "Invalid value for filter '" + filterName + "': " + raw + ". Allowed values: " + allowed,
+                    org.springframework.http.HttpStatus.BAD_REQUEST
+            );
+        }
+    }
 
     private void releaseOrderReservation(Order order) {
         List<OrderItem> items = orderItemRepository.findByOrderIdWithProduct(order.getId());
