@@ -7,6 +7,8 @@ import com.b2bprocure.system.common.enums.PaymentStatus;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
 import com.b2bprocure.system.common.util.SecurityUtil;
+import com.b2bprocure.system.commission.entity.CommissionRate;
+import com.b2bprocure.system.commission.service.CommissionRateQueryService;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.order.dto.CancelOrderRequest;
 import com.b2bprocure.system.order.dto.OrderDetailResponse;
@@ -35,6 +37,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +58,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final OrderStatusHistoryMapper orderStatusHistoryMapper;
+    private final CommissionRateQueryService commissionRateQueryService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -349,6 +354,31 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                     payment.getId(), order.getId());
         }
         // Online payments were already SUCCESS; retain status without duplicate records
+
+        // Commission snapshot: calculate and store BEFORE final save.
+        // Idempotency: skip if already snapshotted from a previous attempt.
+        if (order.getCommissionRate() == null || order.getCommissionAmount() == null) {
+            LocalDateTime completedAt = LocalDateTime.now();
+            CommissionRate activeRate = commissionRateQueryService
+                    .findActiveRateAt(completedAt)
+                    .orElseThrow(() -> new BusinessException(
+                            ErrorCode.COMMISSION_RATE_NOT_FOUND,
+                            "Cannot complete order " + order.getId()
+                                    + ": no active commission rate at " + completedAt));
+
+            // Rate is stored as raw percentage (e.g., 5 means 5%), not fraction (0.05)
+            BigDecimal percentageFraction = activeRate.getRate()
+                    .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+            BigDecimal commissionAmount = order.getSubtotal()
+                    .multiply(percentageFraction)
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            order.setCommissionRate(activeRate.getRate());
+            order.setCommissionAmount(commissionAmount);
+
+            log.info("Commission snapshot for order {}: rate={}, subtotal={}, commission={}",
+                    order.getId(), activeRate.getRate(), order.getSubtotal(), commissionAmount);
+        }
 
         order.setStatus(OrderStatus.COMPLETED);
         order.setUpdatedAt(LocalDateTime.now());

@@ -5,6 +5,8 @@ import com.b2bprocure.system.category.repository.CategoryRepository;
 import com.b2bprocure.system.common.enums.OrderStatus;
 import com.b2bprocure.system.common.enums.PaymentMethod;
 import com.b2bprocure.system.common.enums.PaymentStatus;
+import com.b2bprocure.system.commission.entity.CommissionRate;
+import com.b2bprocure.system.commission.repository.CommissionRateRepository;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.repository.CompanyRepository;
 import com.b2bprocure.system.order.dto.CancelOrderRequest;
@@ -100,6 +102,9 @@ public class OrderLifecycleIntegrationTest {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private CommissionRateRepository commissionRateRepository;
+
+    @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
     private String buyerToken;
@@ -167,6 +172,9 @@ public class OrderLifecycleIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        // Clean up commission rates first (FK dependency)
+        commissionRateRepository.deleteAll();
+
         for (Long orderId : createdOrderIds) {
             paymentRepository.findByOrderId(orderId).ifPresent(paymentRepository::delete);
             orderStatusHistoryRepository.deleteAll(orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(orderId));
@@ -488,11 +496,15 @@ public class OrderLifecycleIntegrationTest {
     // =========================================================================
 
     @Test
-    @DisplayName("Case 15: Full Fulfillment Cycle: CONFIRMED -> PREPARING -> SHIPPING -> COMPLETED (COD payment becomes SUCCESS)")
-    void testFulfillment_COD_FullCycle() throws Exception {
+    @DisplayName("Case 15: Full Fulfillment Cycle: CONFIRMED -> PREPARING -> SHIPPING -> COMPLETED (COD payment becomes SUCCESS) + commission snapshot")
+    void testFulfillment_COD_FullCycle_WithCommission() throws Exception {
+        // Given: Commission rate active since yesterday (5%)
+        createCommissionRate(BigDecimal.valueOf(5), LocalDateTime.now().minusDays(1));
+
         Product product = createProduct(supplierCompany1, "Fulfillment COD Prod", 100, 0);
         Order order = createOrderWithPayment(buyerUser, buyerCompany, supplierCompany1,
                 OrderStatus.CONFIRMED, PaymentMethod.COD, PaymentStatus.PENDING, product, 10);
+        // subtotal = 100000 * 10 = 1,000,000
 
         // 1. CONFIRMED -> PREPARING
         mockMvc.perform(patch("/api/v1/supplier/orders/" + order.getId() + "/preparing")
@@ -517,17 +529,26 @@ public class OrderLifecycleIntegrationTest {
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(payment.getPaidAt()).isNotNull();
 
+        // Verify Commission snapshot: rate = 5%, subtotal = 1,000,000, commission = 50,000
+        Order completedOrder = orderRepository.findById(order.getId()).orElseThrow();
+        assertThat(completedOrder.getCommissionRate()).isEqualByComparingTo(BigDecimal.valueOf(5));
+        assertThat(completedOrder.getCommissionAmount()).isEqualByComparingTo(BigDecimal.valueOf(50000));
+
         // Verify all 4 history states recorded
         List<OrderStatusHistory> histories = orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(order.getId());
         assertThat(histories).hasSize(4);
     }
 
     @Test
-    @DisplayName("Case 16: Online order completed -> Payment stays SUCCESS without duplicate records")
-    void testFulfillment_Online_Completed_RetainsPaymentSuccess() throws Exception {
+    @DisplayName("Case 16: Online order completed -> Payment stays SUCCESS + commission snapshot")
+    void testFulfillment_Online_Completed_RetainsPaymentSuccess_WithCommission() throws Exception {
+        // Given: Commission rate active since yesterday (5%)
+        createCommissionRate(BigDecimal.valueOf(5), LocalDateTime.now().minusDays(1));
+
         Product product = createProduct(supplierCompany1, "Fulfillment Online Prod", 100, 0);
         Order order = createOrderWithPayment(buyerUser, buyerCompany, supplierCompany1,
                 OrderStatus.SHIPPING, PaymentMethod.ZALOPAY, PaymentStatus.SUCCESS, product, 10);
+        // subtotal = 100000 * 10 = 1,000,000
 
         mockMvc.perform(patch("/api/v1/supplier/orders/" + order.getId() + "/complete")
                         .header("Authorization", "Bearer " + supplierToken))
@@ -536,6 +557,11 @@ public class OrderLifecycleIntegrationTest {
 
         Payment payment = paymentRepository.findByOrderId(order.getId()).orElseThrow();
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+
+        // Verify Commission snapshot: same calculation as COD
+        Order completedOrder = orderRepository.findById(order.getId()).orElseThrow();
+        assertThat(completedOrder.getCommissionRate()).isEqualByComparingTo(BigDecimal.valueOf(5));
+        assertThat(completedOrder.getCommissionAmount()).isEqualByComparingTo(BigDecimal.valueOf(50000));
     }
 
     @Test
@@ -760,5 +786,14 @@ public class OrderLifecycleIntegrationTest {
         User saved = userRepository.save(u);
         createdUserIds.add(saved.getId());
         return saved;
+    }
+
+    private CommissionRate createCommissionRate(BigDecimal rate, LocalDateTime effectiveFrom) {
+        CommissionRate commissionRate = new CommissionRate();
+        commissionRate.setRate(rate);
+        commissionRate.setEffectiveFrom(effectiveFrom);
+        commissionRate.setCreatedBy(adminUser);
+        commissionRate.setCreatedAt(LocalDateTime.now());
+        return commissionRateRepository.save(commissionRate);
     }
 }

@@ -26,7 +26,8 @@ public enum ErrorCode {
     ZALOPAY_PAYMENT_NOT_FOUND("Payment not found for ZaloPay callback", HttpStatus.NOT_FOUND),
     ZALOPAY_AMOUNT_MISMATCH("ZaloPay callback amount mismatch", HttpStatus.BAD_REQUEST),
     ZALOPAY_INVALID_RESPONSE("ZaloPay API returned invalid response", HttpStatus.BAD_GATEWAY),
-    PAYMENT_TIMEOUT_EXPIRED("Payment has expired", HttpStatus.BAD_REQUEST);
+    PAYMENT_TIMEOUT_EXPIRED("Payment has expired", HttpStatus.BAD_REQUEST),
+    COMMISSION_RATE_NOT_FOUND("No active commission rate configured for the order completion time", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String defaultMessage;
     private final HttpStatus httpStatus;
