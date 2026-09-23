@@ -5,6 +5,7 @@ import com.b2bprocure.system.common.response.ApiResponse;
 import com.b2bprocure.system.security.CustomOAuth2AuthorizationRequestResolver;
 import com.b2bprocure.system.security.JwtAuthenticationFilter;
 import com.b2bprocure.system.security.JwtTokenProvider;
+import com.b2bprocure.system.security.OAuth2AuthenticationFailureHandler;
 import com.b2bprocure.system.security.OAuth2AuthenticationSuccessHandler;
 import com.b2bprocure.system.security.OAuth2LinkStateStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +40,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
+    private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     private final OAuth2LinkStateStore oauth2LinkStateStore;
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
@@ -61,6 +63,7 @@ public class SecurityConfig {
             )
             .oauth2Login(oauth2 -> {
                 oauth2.successHandler(oAuth2AuthenticationSuccessHandler);
+                oauth2.failureHandler(oAuth2AuthenticationFailureHandler);
                 ClientRegistrationRepository clientRegistrationRepository = clientRegistrationRepositoryProvider.getIfAvailable();
                 if (clientRegistrationRepository != null) {
                     oauth2.authorizationEndpoint(auth -> auth.authorizationRequestResolver(

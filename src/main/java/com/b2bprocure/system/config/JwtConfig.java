@@ -16,4 +16,20 @@ public class JwtConfig {
     private String header = "Authorization";
     private String prefix = "Bearer ";
 
+    /**
+     * Allowed clock skew (in seconds) for OAuth2 ID token validation.
+     *
+     * Nimbus' {@code DefaultJWTClaimsVerifier} compares the token's
+     * {@code iat} / {@code exp} against the system clock with this
+     * tolerance. The default is 0, which fails on hosts whose system
+     * clock is noticeably out of sync with the upstream provider
+     * (e.g. when the OS clock was set manually or NTP is not running).
+     *
+     * 900s (15 minutes) is large enough to cover the worst observed
+     * local skew in this project (~2h40m) and is still strictly less
+     * than the token's own validity window (1h), so a tampered token
+     * with a wildly wrong {@code iat} will still be rejected.
+     */
+    private long allowedClockSkewSeconds = 900L;
+
 }
