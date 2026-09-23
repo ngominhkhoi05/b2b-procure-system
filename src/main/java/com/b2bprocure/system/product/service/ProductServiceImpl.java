@@ -1,5 +1,6 @@
 package com.b2bprocure.system.product.service;
 
+import com.b2bprocure.system.admin.dto.AdminProductDetailResponse;
 import com.b2bprocure.system.category.entity.Category;
 import com.b2bprocure.system.category.repository.CategoryRepository;
 import com.b2bprocure.system.common.constant.SecurityConstants;
@@ -10,12 +11,15 @@ import com.b2bprocure.system.common.util.SecurityUtil;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.repository.CompanyRepository;
 import com.b2bprocure.system.product.dto.CreateProductRequest;
+import com.b2bprocure.system.product.dto.ProductPriceResponse;
 import com.b2bprocure.system.product.dto.ProductResponse;
 import com.b2bprocure.system.product.dto.ProductSearchRequest;
 import com.b2bprocure.system.product.dto.ProductStatusUpdateRequest;
 import com.b2bprocure.system.product.dto.UpdateProductRequest;
 import com.b2bprocure.system.product.entity.Product;
+import com.b2bprocure.system.product.entity.ProductPrice;
 import com.b2bprocure.system.product.mapper.ProductMapper;
+import com.b2bprocure.system.product.mapper.ProductPriceMapper;
 import com.b2bprocure.system.product.repository.ProductPriceRepository;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.user.entity.User;
@@ -44,6 +48,7 @@ public class ProductServiceImpl implements ProductService {
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
     private final ProductMapper productMapper;
+    private final ProductPriceMapper productPriceMapper;
 
     private User getCurrentAuthenticatedUser() {
         Optional<Long> userIdOpt = SecurityUtil.getCurrentUserId();
@@ -240,6 +245,33 @@ public class ProductServiceImpl implements ProductService {
         }
 
         throw new AccessDeniedException("Access denied: You do not have permission to access this product");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AdminProductDetailResponse getProductDetailForAdmin(Long id) {
+        User currentUser = getCurrentAuthenticatedUser();
+        String roleName = currentUser.getRole() != null ? currentUser.getRole().getName() : "";
+        if (!SecurityConstants.ROLE_ADMIN.equalsIgnoreCase(roleName)) {
+            throw new AccessDeniedException("Access denied: Only administrators can access this endpoint");
+        }
+
+        Product product = productRepository.findByIdWithDetails(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "id", id));
+
+        ProductResponse productResponse = productMapper.toResponse(product);
+
+        // Fetch price tiers: one batched SQL query (sorted asc by minQuantity).
+        // No N+1: a single call to findByProductIdOrderByMinQuantityAsc.
+        List<ProductPrice> prices = productPriceRepository.findByProductIdOrderByMinQuantityAsc(id);
+        List<ProductPriceResponse> priceTiers = prices.stream()
+                .map(productPriceMapper::toResponse)
+                .toList();
+
+        return AdminProductDetailResponse.builder()
+                .product(productResponse)
+                .priceTiers(priceTiers)
+                .build();
     }
 
     @Override

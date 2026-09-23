@@ -1,6 +1,8 @@
 package com.b2bprocure.system.commission.repository;
 
 import com.b2bprocure.system.commission.entity.CommissionRate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -42,4 +44,10 @@ public interface CommissionRateRepository extends JpaRepository<CommissionRate, 
         }
         return Optional.of(rates.get(0));
     }
+
+    /**
+     * Step 8 — Admin Commission Rate list: all rates ordered by effectiveFrom DESC.
+     * Simple paginated query — no date filter needed for admin view.
+     */
+    Page<CommissionRate> findAllByOrderByEffectiveFromDesc(Pageable pageable);
 }

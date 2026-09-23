@@ -48,4 +48,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    /**
+     * Step 8 — Admin Company Detail: count users belonging to a company.
+     */
+    long countByCompanyId(Long companyId);
 }

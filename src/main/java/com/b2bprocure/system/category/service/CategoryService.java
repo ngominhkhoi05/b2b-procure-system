@@ -19,4 +19,11 @@ public interface CategoryService {
 
     CategoryResponse updateCategoryStatus(Long id, CategoryStatusUpdateRequest request);
 
+    /**
+     * Step 8 — Admin Category Delete.
+     *
+     * Only succeeds when no Product references the category.
+     * Returns void (no entity retrieval needed by caller).
+     */
+    void deleteCategory(Long id);
 }
