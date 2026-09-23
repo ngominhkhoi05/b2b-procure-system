@@ -55,6 +55,7 @@ public class PaymentTimeoutService {
      * Runs every 5 minutes to avoid spamming ZaloPay API.
      */
     @Scheduled(fixedRate = 300000) // 5 minutes
+    @Transactional
     public void processExpiredPayments() {
         log.info("Payment timeout scheduler started");
 
