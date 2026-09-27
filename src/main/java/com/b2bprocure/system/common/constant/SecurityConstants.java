@@ -24,6 +24,11 @@ public final class SecurityConstants {
     public static final String[] PUBLIC_URLS = {
             "/api/v1/auth/**",
             "/api/v1/payments/zalopay/callback",
+            // ZaloPay sandbox always posts to `<host>/callback` regardless of
+            // the URL we register. Production uses the full path above;
+            // we keep both whitelisted so dev/sandbox works without
+            // env changes. See ZaloPayCallbackController.
+            "/callback",
             "/oauth2/**",
             "/login/oauth2/**",
             "/v3/api-docs/**",
