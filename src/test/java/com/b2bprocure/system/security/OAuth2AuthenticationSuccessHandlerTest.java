@@ -94,7 +94,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
         User user = new User(
                 10L, role, null, "buyer", "hashed_password",
                 "Buyer User", "buyer@gmail.com", "0901234567",
-                "https://avatar.google.com/photo.jpg", null, "ACTIVE",
+                "https://avatar.google.com/photo.jpg", null, null, null, "ACTIVE",
                 LocalDateTime.now(), LocalDateTime.now()
         );
         AuthAccount authAccount = AuthAccount.builder()
