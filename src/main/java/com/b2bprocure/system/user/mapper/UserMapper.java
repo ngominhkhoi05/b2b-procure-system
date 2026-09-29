@@ -28,6 +28,11 @@ public interface UserMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    // avatarPublicId / coverImagePublicId are ignored here on purpose.
+    // They are handled by UserServiceImpl.replaceUserImage with custom
+    // destroy-then-swap logic that the mapper cannot express.
+    @Mapping(target = "avatarPublicId", ignore = true)
+    @Mapping(target = "coverImagePublicId", ignore = true)
     void updateEntity(UpdateUserRequest request, @MappingTarget User user);
 
 }

@@ -34,4 +34,14 @@ public class UpdateUserRequest {
     @Schema(description = "Cover image URL", example = "https://example.com/cover.jpg")
     private String coverImageUrl;
 
+    @Size(max = 255, message = "Avatar publicId must not exceed 255 characters")
+    @Schema(description = "Cloudinary publicId for avatar, returned by /api/v1/uploads/avatar. Used so the service can delete the old file on replace.",
+            example = "b2b-procure/dev/users/avatars/abc123")
+    private String avatarPublicId;
+
+    @Size(max = 255, message = "Cover image publicId must not exceed 255 characters")
+    @Schema(description = "Cloudinary publicId for cover image, returned by /api/v1/uploads/cover. Used so the service can delete the old file on replace.",
+            example = "b2b-procure/dev/users/covers/abc123")
+    private String coverImagePublicId;
+
 }
