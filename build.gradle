@@ -44,6 +44,12 @@ dependencies {
 	// OpenAPI / Swagger
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
 
+	// Cloudinary SDK — handles image + raw file uploads, returns secure HTTPS URLs.
+	// cloudinary-http44 is the latest in the legacy v1 line; v2.x renamed the artifact
+	// to cloudinary-http5 / cloudinary-core. We pin to 1.39.0 (Jul 2024) because it
+	// still ships the simple Cloudinary client + uploader API used in CloudinaryStorageService.
+	implementation 'com.cloudinary:cloudinary-http44:1.39.0'
+
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'

@@ -5,6 +5,15 @@ spring:
   profiles:
     active: dev
 
+  servlet:
+    multipart:
+      # Cap individual file at 6 MB so multipart parsing itself never OOMs.
+      # CloudinaryStorageService enforces a tighter app-level limit
+      # (app.cloudinary.max-bytes, default 5 MB) on top of this.
+      max-file-size: 6MB
+      max-request-size: 6MB
+      file-size-threshold: 1MB
+
   security:
     oauth2:
       client:
@@ -36,6 +45,18 @@ app:
     exposed-headers: Authorization,Content-Type,X-Requested-With
     allow-credentials: true
     max-age: 3600
+
+  # Cloudinary — generic image storage for user avatars, covers, product imagery.
+  # Backend never stores binary, only these URLs (see AGENTS.md Rule 9).
+  cloudinary:
+    cloud-name: ${CLOUDINARY_CLOUD_NAME}
+    api-key:    ${CLOUDINARY_API_KEY}
+    api-secret: ${CLOUDINARY_API_SECRET}
+    # Logical root folder under the cloud. Per-profile YAML can override
+    # to e.g. "b2b-procure/dev" so dev uploads don't pollute prod.
+    folder:     ${CLOUDINARY_FOLDER:b2b-procure}
+    # App-level hard cap. Keep <= spring.servlet.multipart.max-file-size.
+    max-bytes:  5242880
 
 server:
   port: 8080
