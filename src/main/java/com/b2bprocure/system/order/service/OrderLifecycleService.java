@@ -6,6 +6,7 @@ import com.b2bprocure.system.order.dto.OrderDetailResponse;
 import com.b2bprocure.system.order.dto.OrderResponse;
 import com.b2bprocure.system.order.dto.OrderStatusHistoryResponse;
 import com.b2bprocure.system.order.dto.RejectOrderRequest;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreatePaymentResponse;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
@@ -18,6 +19,20 @@ public interface OrderLifecycleService {
     OrderResponse rejectOrder(Long orderId, RejectOrderRequest request);
 
     OrderResponse cancelOrder(Long orderId, CancelOrderRequest request);
+
+    /**
+     * Re-initiate ZaloPay payment for an order whose Payment is still PENDING.
+     *
+     * Used by the Order Detail page so a buyer who closed the ZaloPay tab by
+     * accident can resume payment without going back to checkout. Delegates to
+     * {@code ZaloPayService.initiatePayment(paymentId, orderId)} which is
+     * idempotent — if the Payment already has a ZaloPay order, the existing URL
+     * is returned as-is.
+     *
+     * Buyer-only. Validates ownership (creator OR same buyer company) and that
+     * the Payment method is ZALOPAY + status is PENDING.
+     */
+    ZaloPayCreatePaymentResponse retryZaloPayPayment(Long orderId);
 
     OrderResponse updateToPreparing(Long orderId);
 
