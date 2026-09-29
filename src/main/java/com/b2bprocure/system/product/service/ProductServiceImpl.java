@@ -7,6 +7,7 @@ import com.b2bprocure.system.common.constant.SecurityConstants;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
 import com.b2bprocure.system.common.response.PageResponse;
+import com.b2bprocure.system.common.storage.CloudinaryStorageService;
 import com.b2bprocure.system.common.util.SecurityUtil;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.repository.CompanyRepository;
@@ -49,6 +50,7 @@ public class ProductServiceImpl implements ProductService {
     private final UserRepository userRepository;
     private final ProductMapper productMapper;
     private final ProductPriceMapper productPriceMapper;
+    private final CloudinaryStorageService cloudinaryStorage;
 
     private User getCurrentAuthenticatedUser() {
         Optional<Long> userIdOpt = SecurityUtil.getCurrentUserId();
@@ -133,6 +135,10 @@ public class ProductServiceImpl implements ProductService {
         }
         if (request.getImageUrl() != null) {
             product.setImageUrl(request.getImageUrl().trim());
+        }
+        if (request.getImagePublicId() != null) {
+            String trimmedPublicId = request.getImagePublicId().trim();
+            product.setImagePublicId(trimmedPublicId.isEmpty() ? null : trimmedPublicId);
         }
         product.setStockQuantity(stockQuantity);
         product.setStatus("ACTIVE");
@@ -337,19 +343,98 @@ public class ProductServiceImpl implements ProductService {
             throw new BusinessException("Product name is required", HttpStatus.BAD_REQUEST);
         }
 
+        // Snapshot old image references BEFORE the mapper overwrites them.
+        // (The mapper only writes simple fields with null=ignore semantics;
+        // imagePublicId is ignored entirely by the mapper and handled below.)
+        String oldImageUrl      = product.getImageUrl();
+        String oldImagePublicId = product.getImagePublicId();
+
         productMapper.updateEntity(request, product);
         product.setName(trimmedName);
         if (request.getDescription() != null) {
             product.setDescription(request.getDescription().trim());
         }
-        if (request.getImageUrl() != null) {
-            product.setImageUrl(request.getImageUrl().trim());
-        }
+
+        // Handle product image replace / clear with Cloudinary cleanup.
+        // Only meaningful when the request actually carries image fields;
+        // for a SKU-only update, both newUrl and newPublicId are null and
+        // this is a no-op.
+        replaceProductImage(
+            product,
+            request.getImageUrl(),
+            request.getImagePublicId(),
+            oldImageUrl,
+            oldImagePublicId);
+
         product.setUpdatedAt(LocalDateTime.now());
 
         Product savedProduct = productRepository.save(product);
         log.info("Product updated successfully with id: {}", savedProduct.getId());
         return productMapper.toResponse(savedProduct);
+    }
+
+    /**
+     * Apply a single image replace/clear decision for a product.
+     *
+     * Decision matrix:
+     *   newUrl blank/empty  → user wants to clear the image → destroy old, set null.
+     *   newUrl == oldUrl    → no-op (could be a save with no change), do not destroy.
+     *   newUrl != oldUrl    → user uploaded a new image → destroy old, save new + publicId.
+     *   newUrl present, oldUrl null (first image upload on existing product)
+     *                        → no destroy needed, just save new + publicId.
+     *
+     * Why is the destroy call inside the @Transactional method but its failure
+     * is only logged?
+     *   Losing the old Cloudinary file is annoying but never blocks the
+     *   supplier from saving the new image. Rolling back the whole product
+     *   save because the delete call failed would punish the supplier for
+     *   our housekeeping problem. A separate cron (future work) can sweep
+     *   orphans.
+     */
+    private void replaceProductImage(
+        Product product,
+        String newUrl,
+        String newPublicId,
+        String oldUrl,
+        String oldPublicId
+    ) {
+        // No image fields sent → nothing to do (also avoids the case where
+        // the request was a no-op save and both args are null).
+        if (newUrl == null && newPublicId == null) {
+            return;
+        }
+
+        boolean clearing = (newUrl == null || newUrl.isBlank());
+        boolean changing = !clearing && !newUrl.equals(oldUrl);
+
+        if (!clearing && !changing) {
+            return; // URL unchanged — nothing to do (also no destroy).
+        }
+
+        // Best-effort cleanup of the previous Cloudinary asset. We only
+        // destroy when there is actually a previous publicId to clean up.
+        // (First-time upload: oldPublicId is null → skip destroy.)
+        if (oldPublicId != null && !oldPublicId.isBlank()) {
+            try {
+                cloudinaryStorage.delete(oldPublicId);
+            } catch (Exception ex) {
+                // CloudinaryStorageService.delete already swallows + logs
+                // non-fatal failures (per its contract: "failures are
+                // logged but never thrown"). This catch is a defensive
+                // belt-and-braces in case that contract ever changes.
+                log.warn("Failed to delete old product image (publicId={}): {}",
+                    oldPublicId, ex.getMessage());
+            }
+        }
+
+        if (clearing) {
+            product.setImageUrl(null);
+            product.setImagePublicId(null);
+        } else {
+            product.setImageUrl(newUrl.trim());
+            product.setImagePublicId(
+                newPublicId != null && !newPublicId.isBlank() ? newPublicId.trim() : null);
+        }
     }
 
     @Override

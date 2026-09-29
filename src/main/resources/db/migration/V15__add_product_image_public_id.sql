@@ -1,0 +1,31 @@
+-- ============================================================================
+-- V15__add_product_image_public_id.sql
+-- B2B Procure System - Track Cloudinary publicId for product image
+--
+-- Reason:
+--   Mirrors V14 for the user avatar/cover flow, but applied to products.
+--   When a supplier replaces a product image, the old Cloudinary asset
+--   is currently orphaned (the URL is overwritten in the DB but nothing
+--   deletes the previous Cloudinary asset). That accumulates as storage
+--   garbage over time.
+--
+--   We store the Cloudinary publicId alongside the URL so the product
+--   service can call cloudinary.uploader().destroy(publicId) before
+--   writing the new URL. See CloudinaryStorageService.destroy(...).
+--
+--   Length 255 matches Cloudinary's own public_id column width guidance
+--   and is plenty for any folder/timestamp/filename combination we
+--   generate (e.g. "b2b-procure/products/42/abc123def").
+--
+-- Safety:
+--   - Additive only (one nullable VARCHAR column). No data migration
+--     needed — existing rows simply have NULL publicId until the next
+--     upload, at which point we delete the previous file opportunistically
+--     (and the previous file's publicId is lost anyway, so we accept that
+--     pre-V15 images are unrecoverable for deletion).
+--   - No index needed: lookup is always by product id (PK lookup), never
+--     by publicId.
+-- ============================================================================
+
+ALTER TABLE products
+    ADD COLUMN image_public_id VARCHAR(255);

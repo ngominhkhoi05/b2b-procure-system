@@ -38,6 +38,10 @@ public interface ProductMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "sku", ignore = true)
+    // imagePublicId is ignored here on purpose. It is handled by
+    // ProductServiceImpl#replaceProductImage with destroy-then-swap
+    // logic that the mapper cannot express.
+    @Mapping(target = "imagePublicId", ignore = true)
     void updateEntity(UpdateProductRequest request, @MappingTarget Product product);
 
 }
