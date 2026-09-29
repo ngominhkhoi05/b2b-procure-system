@@ -59,6 +59,12 @@ public class User {
     @Column(name = "cover_image_url", length = 500)
     private String coverImageUrl;
 
+    @Column(name = "avatar_public_id", length = 255)
+    private String avatarPublicId;
+
+    @Column(name = "cover_image_public_id", length = 255)
+    private String coverImagePublicId;
+
     @Column(name = "status")
     private String status;
 

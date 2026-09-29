@@ -3,6 +3,7 @@ package com.b2bprocure.system.user.service;
 import com.b2bprocure.system.common.exception.BusinessException;
 import com.b2bprocure.system.common.exception.ResourceNotFoundException;
 import com.b2bprocure.system.common.response.PageResponse;
+import com.b2bprocure.system.common.storage.CloudinaryStorageService;
 import com.b2bprocure.system.common.util.SecurityUtil;
 import com.b2bprocure.system.user.dto.ChangePasswordRequest;
 import com.b2bprocure.system.user.dto.UpdateUserRequest;
@@ -32,6 +33,7 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final CloudinaryStorageService cloudinaryStorage;
 
     private User getCurrentAuthenticatedUser() {
         Optional<Long> userIdOpt = SecurityUtil.getCurrentUserId();
@@ -55,11 +57,91 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse updateCurrentUser(UpdateUserRequest request) {
         User currentUser = getCurrentAuthenticatedUser();
+
+        // MapStruct fills the simple fields (fullName, phone, avatarUrl,
+        // coverImageUrl) with null=ignore semantics. Image publicIds are
+        // intentionally excluded from the mapper and handled below because
+        // they need to coordinate with a Cloudinary destroy call.
         userMapper.updateEntity(request, currentUser);
+
+        // Handle avatar replace / clear with Cloudinary cleanup.
+        replaceUserImage(
+            currentUser,
+            /* newUrl      */ request.getAvatarUrl(),
+            /* newPublicId */ request.getAvatarPublicId(),
+            /* oldUrl      */ currentUser.getAvatarUrl(),
+            /* oldPublicId */ currentUser.getAvatarPublicId(),
+            /* isAvatar    */ true);
+
+        // Handle cover replace / clear with Cloudinary cleanup.
+        replaceUserImage(
+            currentUser,
+            /* newUrl      */ request.getCoverImageUrl(),
+            /* newPublicId */ request.getCoverImagePublicId(),
+            /* oldUrl      */ currentUser.getCoverImageUrl(),
+            /* oldPublicId */ currentUser.getCoverImagePublicId(),
+            /* isAvatar    */ false);
+
         currentUser.setUpdatedAt(LocalDateTime.now());
         User savedUser = userRepository.save(currentUser);
         log.info("User id: {} updated their profile", currentUser.getId());
         return userMapper.toResponse(savedUser);
+    }
+
+    /**
+     * Apply a single image replace/clear decision for the current user.
+     *
+     * Decision matrix:
+     *   newUrl blank/empty → user wants to clear the image → destroy old, set null.
+     *   newUrl == oldUrl   → no-op, do not destroy (could be a save with no change).
+     *   newUrl != oldUrl   → user uploaded a new image → destroy old, save new + publicId.
+     *
+     * Why is the destroy call inside the @Transactional method but its failure
+     * is only logged?
+     *   Losing the old Cloudinary file is annoying but never blocks the user
+     *   from saving a new avatar. Rolling back the whole profile save because
+     *   the delete call failed would punish the user for our housekeeping
+     *   problem. A separate cron (future work) can sweep orphans.
+     */
+    private void replaceUserImage(
+        User user,
+        String newUrl,
+        String newPublicId,
+        String oldUrl,
+        String oldPublicId,
+        boolean isAvatar
+    ) {
+        String kind = isAvatar ? "avatar" : "cover";
+        boolean clearing = (newUrl == null || newUrl.isBlank());
+        boolean changing = !clearing && !newUrl.equals(oldUrl);
+
+        if (!clearing && !changing) {
+            return; // URL unchanged — nothing to do (also no destroy).
+        }
+
+        // Best-effort cleanup of the previous Cloudinary asset. We only
+        // destroy when there is actually a previous publicId to clean up.
+        if (oldPublicId != null && !oldPublicId.isBlank()) {
+            try {
+                cloudinaryStorage.delete(oldPublicId);
+            } catch (Exception ex) {
+                // CloudinaryStorageService.delete already swallows + logs
+                // non-fatal failures (per its contract: "failures are
+                // logged but never thrown"). This catch is a defensive
+                // belt-and-braces in case that contract ever changes.
+                log.warn("Failed to delete old {} image (publicId={}): {}",
+                    kind, oldPublicId, ex.getMessage());
+            }
+        }
+
+        if (clearing) {
+            user.setAvatarUrl(null);
+            user.setAvatarPublicId(null);
+        } else {
+            user.setAvatarUrl(newUrl);
+            user.setAvatarPublicId(
+                newPublicId != null && !newPublicId.isBlank() ? newPublicId : null);
+        }
     }
 
     @Override
@@ -116,7 +198,23 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findByIdWithRoleAndCompany(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
 
+        // Snapshot old image references BEFORE the mapper overwrites them.
+        String oldAvatarUrl      = user.getAvatarUrl();
+        String oldAvatarPublicId = user.getAvatarPublicId();
+        String oldCoverUrl       = user.getCoverImageUrl();
+        String oldCoverPublicId  = user.getCoverImagePublicId();
+
         userMapper.updateEntity(request, user);
+
+        // Admins can also trigger avatar/cover replacement. Reuse the same
+        // helper so the cleanup policy is identical to self-service updates.
+        replaceUserImage(user,
+            request.getAvatarUrl(), request.getAvatarPublicId(),
+            oldAvatarUrl, oldAvatarPublicId, true);
+        replaceUserImage(user,
+            request.getCoverImageUrl(), request.getCoverImagePublicId(),
+            oldCoverUrl, oldCoverPublicId, false);
+
         user.setUpdatedAt(LocalDateTime.now());
         User savedUser = userRepository.save(user);
         log.info("Admin updated profile for user id: {}", id);
