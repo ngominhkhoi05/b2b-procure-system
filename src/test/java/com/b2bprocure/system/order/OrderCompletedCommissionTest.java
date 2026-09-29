@@ -178,7 +178,7 @@ class OrderCompletedCommissionTest {
     private User createUser(String username, Role role, Company company) {
         return userRepository.save(new User(null, role, company, username,
                 "$2a$10$xyz123mockpassword", "Test " + username, username + "@test.com",
-                "0900000001", null, null, "ACTIVE",
+                "0900000001", null, null, null, null, "ACTIVE",
                 LocalDateTime.now(), LocalDateTime.now()));
     }
 

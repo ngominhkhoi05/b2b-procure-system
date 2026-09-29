@@ -33,6 +33,9 @@ public class CreateProductRequest {
     @Size(max = 500, message = "Image URL must not exceed 500 characters")
     private String imageUrl;
 
+    @Size(max = 255, message = "Image publicId must not exceed 255 characters")
+    private String imagePublicId;
+
     @PositiveOrZero(message = "Stock quantity must be zero or positive")
     private Integer stockQuantity;
 }
