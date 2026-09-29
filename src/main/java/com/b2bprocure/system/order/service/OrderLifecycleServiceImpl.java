@@ -34,6 +34,8 @@ import com.b2bprocure.system.product.entity.Product;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.user.entity.User;
 import com.b2bprocure.system.user.repository.UserRepository;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreatePaymentResponse;
+import com.b2bprocure.system.zalopay.service.ZaloPayService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -73,6 +75,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     private final OrderStatusHistoryMapper orderStatusHistoryMapper;
     private final PaymentSummaryMapper paymentSummaryMapper;
     private final CommissionRateQueryService commissionRateQueryService;
+    private final ZaloPayService zaloPayService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -291,6 +294,56 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 order.getId(), order.getOrderCode(), buyerUser.getUsername(), cancelNote);
 
         return orderMapper.toResponse(order);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ZaloPayCreatePaymentResponse retryZaloPayPayment(Long orderId) {
+        // 1. Authenticate & Authorize Buyer (controller @PreAuthorize already restricts role)
+        User buyerUser = getAuthenticatedBuyerUser();
+
+        // 2. Load Order (do not lock — initiating payment does not mutate order rows)
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+        // 3. Ownership Validation (creator OR same buyer company)
+        boolean isCreator = order.getCreatedBy() != null
+                && order.getCreatedBy().getId().equals(buyerUser.getId());
+        boolean isSameCompany = buyerUser.getCompany() != null
+                && order.getBuyerCompany() != null
+                && order.getBuyerCompany().getId().equals(buyerUser.getCompany().getId());
+        if (!isCreator && !isSameCompany) {
+            throw new AccessDeniedException("Access denied: Order does not belong to the current buyer");
+        }
+
+        // 4. Load Payment for this order
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment", "orderId", orderId));
+
+        // 5. Method Validation: only ZaloPay orders are retryable
+        if (payment.getPaymentMethod() != PaymentMethod.ZALOPAY) {
+            throw new BusinessException(
+                    "Only ZaloPay payments can be retried from the Order Detail page. " +
+                            "Current payment method: " + payment.getPaymentMethod(),
+                    org.springframework.http.HttpStatus.BAD_REQUEST
+            );
+        }
+
+        // 6. Status Validation: only PENDING payments can be retried
+        if (payment.getStatus() != PaymentStatus.PENDING) {
+            throw new BusinessException(
+                    "Payment is not in PENDING status and cannot be retried. Current status: " + payment.getStatus(),
+                    org.springframework.http.HttpStatus.BAD_REQUEST
+            );
+        }
+
+        // 7. Delegate to ZaloPayService — idempotent, returns existing URL or creates a new one
+        ZaloPayCreatePaymentResponse response = zaloPayService.initiatePayment(payment.getId(), orderId);
+
+        log.info("ZaloPay payment retried: orderId={}, paymentId={}, buyer={}",
+                orderId, payment.getId(), buyerUser.getUsername());
+
+        return response;
     }
 
     @Override

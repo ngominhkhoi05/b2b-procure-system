@@ -7,6 +7,7 @@ import com.b2bprocure.system.order.dto.OrderDetailResponse;
 import com.b2bprocure.system.order.dto.OrderResponse;
 import com.b2bprocure.system.order.dto.OrderStatusHistoryResponse;
 import com.b2bprocure.system.order.service.OrderLifecycleService;
+import com.b2bprocure.system.zalopay.dto.ZaloPayCreatePaymentResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -104,6 +105,34 @@ public class OrderController {
     ) {
         OrderResponse response = orderLifecycleService.cancelOrder(orderId, request);
         return ResponseEntity.ok(ApiResponse.success("Order cancelled successfully", response));
+    }
+
+    @Operation(
+            summary = "Retry ZaloPay Payment for an Order",
+            description = "Re-initiates ZaloPay payment for an order whose payment is still PENDING. " +
+                    "Intended for the Order Detail page so a buyer who closed the ZaloPay tab by accident " +
+                    "can resume payment without going through checkout again. The underlying ZaloPay " +
+                    "initiation is idempotent: if the Payment already has a ZaloPay URL it is returned as-is."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "ZaloPay payment (re-)initiated successfully",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Order is not payable by ZaloPay or payment is not in PENDING status",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden - Order does not belong to current buyer",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Order or payment not found",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "ZaloPay API unavailable or returned error",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @PostMapping("/{orderId}/payments/zalopay/retry")
+    @PreAuthorize("hasRole('BUYER')")
+    public ResponseEntity<ApiResponse<ZaloPayCreatePaymentResponse>> retryZaloPayPayment(
+            @PathVariable Long orderId
+    ) {
+        ZaloPayCreatePaymentResponse response = orderLifecycleService.retryZaloPayPayment(orderId);
+        return ResponseEntity.ok(ApiResponse.success("ZaloPay payment re-initiated", response));
     }
 
     @Operation(summary = "Get Order Detail", description = "Retrieve order details including items, payment summary and status history. " +
