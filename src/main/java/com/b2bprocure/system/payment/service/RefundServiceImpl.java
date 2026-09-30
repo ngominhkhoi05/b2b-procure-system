@@ -115,6 +115,12 @@ public class RefundServiceImpl implements RefundService {
     /**
      * Verify and extract zp_trans_id from payment.
      * Returns null if not available or not numeric.
+     *
+     * <p>ZaloPay transaction IDs are numeric strings (e.g. "260930000001825").
+     * The legacy bug stored `zp_trans_token` here — that is a base64 redirect
+     * token for opening the ZaloPay app, NOT a zp_trans_id, so
+     * {@link Long#parseLong(String)} rejects it. Once {@code ZaloPayServiceImpl}
+     * is fixed, this only rejects genuinely-missing or corrupted ids.
      */
     private String verifyZpTransId(Payment payment) {
         String providerTransId = payment.getProviderTransactionId();
@@ -124,9 +130,6 @@ public class RefundServiceImpl implements RefundService {
             return null;
         }
 
-        // ZaloPay transaction IDs are numeric strings (e.g. "240930000123456").
-        // providerTransactionId may contain zp_trans_token from create-order response;
-        // only a numeric value is acceptable for the refund endpoint.
         try {
             Long.parseLong(providerTransId);
             return providerTransId;

@@ -2,10 +2,12 @@ package com.b2bprocure.system.admin.controller;
 
 import com.b2bprocure.system.admin.dto.AdminCompanyResponse;
 import com.b2bprocure.system.admin.dto.AdminProductDetailResponse;
+import com.b2bprocure.system.admin.dto.AdminRefundRetryResponse;
 import com.b2bprocure.system.admin.dto.AdminStatisticsResponse;
 import com.b2bprocure.system.admin.dto.CommissionRateResponse;
 import com.b2bprocure.system.admin.dto.CreateCommissionRateRequest;
 import com.b2bprocure.system.admin.service.AdminCommissionRateService;
+import com.b2bprocure.system.admin.service.AdminRefundRetryService;
 import com.b2bprocure.system.admin.service.AdminStatisticsService;
 import com.b2bprocure.system.category.dto.CategoryResponse;
 import com.b2bprocure.system.category.dto.CategoryStatusUpdateRequest;
@@ -74,6 +76,7 @@ public class AdminController {
     private final OrderLifecycleService orderLifecycleService;
     private final AdminCommissionRateService adminCommissionRateService;
     private final AdminStatisticsService adminStatisticsService;
+    private final AdminRefundRetryService adminRefundRetryService;
 
     // =========================================================================
     // USER MANAGEMENT
@@ -333,5 +336,25 @@ public class AdminController {
     ) {
         AdminStatisticsResponse response = adminStatisticsService.getOverview(fromDate, toDate);
         return ResponseEntity.ok(ApiResponse.success("Statistics retrieved successfully", response));
+    }
+
+    // =========================================================================
+    // PAYMENT RECOVERY — admin-only backfill for stuck REFUND_PENDING payments.
+    //
+    // Legacy bug stored `zp_trans_token` (a base64 redirect token) in
+    // `payments.provider_transaction_id`. ZaloPay /v2/refund requires the
+    // numeric `zp_trans_id`, so RefundServiceImpl.verifyZpTransId rejected the
+    // stored value and refunds never ran. This endpoint calls ZaloPay /v2/query
+    // with the existing `app_trans_id` to recover the real id, writes it back,
+    // then delegates to the standard refund flow. Idempotent and safe to call
+    // repeatedly. Leave in place as an operational safety net.
+    // =========================================================================
+
+    @PostMapping("/payments/{paymentId}/refund-retry")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<AdminRefundRetryResponse>> retryRefund(
+            @PathVariable Long paymentId) {
+        AdminRefundRetryResponse response = adminRefundRetryService.retryRefund(paymentId);
+        return ResponseEntity.ok(ApiResponse.success("Refund retry processed", response));
     }
 }
