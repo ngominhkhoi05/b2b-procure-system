@@ -63,4 +63,18 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             @Param("status") PaymentStatus status,
             @Param("deadline") LocalDateTime deadline);
 
+    /**
+     * Find all payments currently in REFUND_PENDING state for retry processing.
+     * Used by the pending-refund scheduler to pick up refunds that failed inline
+     * (e.g. ZaloPay API was unreachable when supplier rejected / buyer cancelled).
+     *
+     * <p>Idempotency: RefundService.processRefund re-checks the status under pessimistic
+     * write lock, so duplicate processing between inline call and scheduler is safe.
+     *
+     * @return Payments awaiting refund, oldest first.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.status = com.b2bprocure.system.common.enums.PaymentStatus.REFUND_PENDING ORDER BY p.updatedAt ASC")
+    List<Payment> findPendingRefundsWithLock();
+
 }
