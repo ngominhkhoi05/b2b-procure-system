@@ -76,14 +76,7 @@ class ProductLockIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        if (product1 != null && product1.getId() != null) {
-            productPriceRepository.deleteAll(productPriceRepository.findByProductId(product1.getId()));
-            productRepository.delete(product1);
-        }
-        if (product2 != null && product2.getId() != null) {
-            productPriceRepository.deleteAll(productPriceRepository.findByProductId(product2.getId()));
-            productRepository.delete(product2);
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     @Test

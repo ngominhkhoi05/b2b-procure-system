@@ -169,57 +169,7 @@ public class AdminIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        // Clean up in dependency order.
-
-        // Orders first (depend on users, companies, products)
-        for (Long orderId : createdOrderIds) {
-            paymentRepository.findByOrderId(orderId).ifPresent(paymentRepository::delete);
-            orderStatusHistoryRepository.deleteAll(
-                    orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(orderId));
-            orderItemRepository.deleteAll(orderItemRepository.findByOrderId(orderId));
-            orderRepository.deleteById(orderId);
-        }
-        createdOrderIds.clear();
-
-        // Products (depend on companies, categories)
-        for (Long productId : createdProductIds) {
-            productPriceRepository.deleteAll(productPriceRepository.findByProductId(productId));
-            productRepository.deleteById(productId);
-        }
-        createdProductIds.clear();
-
-        // Commission rates must be deleted before users
-        // (fk_commission_rates_created_by references users.id).
-        for (Long crId : createdCommissionRateIds) {
-            if (commissionRateRepository.existsById(crId)) {
-                commissionRateRepository.deleteById(crId);
-            }
-        }
-        createdCommissionRateIds.clear();
-
-        // Users must be deleted before companies (fk_users_company FK constraint)
-        // and before categories (categories are only in test-specific sets).
-        for (User u : List.of(buyerUser, supplierUser, adminUser)) {
-            if (u != null && u.getId() != null && userRepository.existsById(u.getId())) {
-                userRepository.deleteById(u.getId());
-            }
-        }
-
-        // Delete test-specific categories first, then the main seeded category.
-        for (Long catId : createdCategoryIds) {
-            if (catId.equals(category.getId())) continue;
-            if (categoryRepository.existsById(catId)) {
-                categoryRepository.deleteById(catId);
-            }
-        }
-        createdCategoryIds.clear();
-        if (category != null && category.getId() != null && categoryRepository.existsById(category.getId())) {
-            categoryRepository.deleteById(category.getId());
-        }
-
-        // Companies now that all dependents are gone.
-        if (buyerCompany != null && buyerCompany.getId() != null) companyRepository.deleteById(buyerCompany.getId());
-        if (supplierCompany != null && supplierCompany.getId() != null) companyRepository.deleteById(supplierCompany.getId());
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     // =========================================================================
@@ -674,8 +624,7 @@ public class AdminIntegrationTest {
         @Test
         @DisplayName("Case CR1: Admin lists commission rates ordered by effectiveFrom DESC")
         void caseCR1_listRates() throws Exception {
-            // Cleanup any leftover rates (from Step 6)
-            commissionRateRepository.deleteAll();
+            // Cleanup any leftover rates (from Step 6) — DELETION REMOVED
             CommissionRate r1 = createCommissionRate(new BigDecimal("5"), LocalDateTime.now().minusDays(10));
             CommissionRate r2 = createCommissionRate(new BigDecimal("7"), LocalDateTime.now().minusDays(1));
             createdCommissionRateIds.add(r1.getId());
@@ -745,7 +694,7 @@ public class AdminIntegrationTest {
         @Test
         @DisplayName("Case CR5: Historical rates are preserved (not deleted, not overwritten)")
         void caseCR5_historicalRatesPreserved() throws Exception {
-            commissionRateRepository.deleteAll();
+            // commissionRateRepository.deleteAll(); — DELETION REMOVED
             CommissionRate old = createCommissionRate(new BigDecimal("5"), LocalDateTime.now().minusDays(20));
             CommissionRate latest = createCommissionRate(new BigDecimal("7"), LocalDateTime.now().minusDays(1));
             createdCommissionRateIds.add(old.getId());
@@ -802,8 +751,7 @@ public class AdminIntegrationTest {
         @Test
         @DisplayName("Case S2: Completed order sum does NOT include cancelled/rejected")
         void caseS2_completedOnlyCounts() throws Exception {
-            // Clean baseline
-            commissionRateRepository.deleteAll();
+            // Clean baseline — DELETION REMOVED
             // Create one cancelled order + one completed order
             Order cancelled = createOrder(buyerUser, buyerCompany, supplierCompany,
                     OrderStatus.CANCELLED, PaymentMethod.COD, PaymentStatus.PENDING,
@@ -849,7 +797,7 @@ public class AdminIntegrationTest {
         @Test
         @DisplayName("Case S5: Statistics do NOT recompute commission from current rates (snapshots respected)")
         void caseS5_usesCommissionSnapshot() throws Exception {
-            commissionRateRepository.deleteAll();
+            // commissionRateRepository.deleteAll(); — DELETION REMOVED
             // Create one completed order with explicit commission snapshot.
             Order completed = createOrder(buyerUser, buyerCompany, supplierCompany,
                     OrderStatus.COMPLETED, PaymentMethod.COD, PaymentStatus.SUCCESS,

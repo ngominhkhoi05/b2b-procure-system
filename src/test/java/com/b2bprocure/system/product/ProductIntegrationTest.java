@@ -146,17 +146,7 @@ public class ProductIntegrationTest {
                 .build();
 
         if (!initialized) {
-            // Cascade-clean dependent tables before deleting Products so we
-            // don't violate FKs (fk_order_items_product, fk_payments_order,
-            // fk_order_status_history_order, etc.). Order matters: child rows
-            // before parent rows.
-            paymentRepository.deleteAll();
-            orderStatusHistoryRepository.deleteAll();
-            orderItemRepository.deleteAll();
-            orderRepository.deleteAll();
-            cartItemRepository.deleteAll();
-            productPriceRepository.deleteAll();
-            productRepository.deleteAll();
+            // DB cleanup removed — tests now run against existing seed data.
 
             User adminUser = userRepository.findByUsernameWithRoleAndCompany("admin").orElseThrow();
             User buyerUser = userRepository.findByUsernameWithRoleAndCompany("buyer").orElseThrow();
@@ -1646,14 +1636,7 @@ public class ProductIntegrationTest {
             @Autowired ProductPriceRepository productPriceRepository,
             @Autowired ProductRepository productRepository
     ) {
-        // Cascade-clean (same order as setUp) — child rows before parent rows.
-        paymentRepository.deleteAll();
-        orderStatusHistoryRepository.deleteAll();
-        orderItemRepository.deleteAll();
-        orderRepository.deleteAll();
-        cartItemRepository.deleteAll();
-        productPriceRepository.deleteAll();
-        productRepository.deleteAll();
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
 }

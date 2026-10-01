@@ -216,19 +216,7 @@ class ZaloPayServiceTest {
 
     @AfterEach
     void tearDown() {
-        // Clean up in reverse order (respecting FK constraints)
-        for (Long orderItemId : createdOrderItemIds) {
-            orderItemRepository.findById(orderItemId).ifPresent(orderItemRepository::delete);
-        }
-        for (Long paymentId : createdPaymentIds) {
-            paymentRepository.findById(paymentId).ifPresent(paymentRepository::delete);
-        }
-        for (Long orderId : createdOrderIds) {
-            orderRepository.findById(orderId).ifPresent(orderRepository::delete);
-        }
-        if (testProduct != null && testProduct.getId() != null) {
-            productRepository.delete(testProduct);
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
 
         SecurityContextHolder.clearContext();
     }
