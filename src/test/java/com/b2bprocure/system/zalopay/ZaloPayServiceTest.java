@@ -263,7 +263,15 @@ class ZaloPayServiceTest {
             // Verify payment updated
             Payment updatedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
             assertThat(updatedPayment.getAppTransId()).isNotNull();
-            assertThat(updatedPayment.getProviderTransactionId()).isEqualTo("test_token_123");
+            // providerTransactionId must remain null on initiatePayment: see
+            // ZaloPayServiceImpl#initiatePayment (deliberate comment block
+            // "Leave providerTransactionId untouched on initiate; callback
+            // fills it in"). The gateway's authoritative zp_trans_id is
+            // delivered in the payment-success callback, and refund relies
+            // on Long.parseLong(providerTransactionId) — saving the
+            // zp_trans_token (e.g. base64 redirect token) here would break
+            // /v2/refund forever.
+            assertThat(updatedPayment.getProviderTransactionId()).isNull();
         }
 
         @Test
