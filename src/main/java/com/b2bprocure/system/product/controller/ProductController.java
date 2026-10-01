@@ -2,6 +2,7 @@ package com.b2bprocure.system.product.controller;
 
 import com.b2bprocure.system.common.response.ApiResponse;
 import com.b2bprocure.system.common.response.PageResponse;
+import com.b2bprocure.system.common.response.SliceResponse;
 import com.b2bprocure.system.product.dto.CreateProductRequest;
 import com.b2bprocure.system.product.dto.ProductResponse;
 import com.b2bprocure.system.product.dto.ProductSearchRequest;
@@ -87,6 +88,33 @@ public class ProductController {
                 .build();
 
         PageResponse<ProductResponse> response = productService.getProducts(searchRequest, pageable);
+        return ResponseEntity.ok(ApiResponse.success("Products retrieved successfully", response));
+    }
+
+    @Operation(summary = "Browse Products (BUYER)", description = "Slice-paginated list of listable products for BUYER browse page. Drops the count(*) query for faster infinite-scroll UX on large catalogs.")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden — BUYER only",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @GetMapping("/browse-products")
+    @PreAuthorize("hasRole('BUYER')")
+    public ResponseEntity<ApiResponse<SliceResponse<ProductResponse>>> getProductsForBuyer(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long supplierCompanyId,
+            @ParameterObject @PageableDefault(page = 0, size = 20) Pageable pageable
+    ) {
+        ProductSearchRequest searchRequest = ProductSearchRequest.builder()
+                .keyword(keyword)
+                .categoryId(categoryId)
+                .supplierCompanyId(supplierCompanyId)
+                .build();
+
+        SliceResponse<ProductResponse> response = productService.getProductsSlice(searchRequest, pageable);
         return ResponseEntity.ok(ApiResponse.success("Products retrieved successfully", response));
     }
 

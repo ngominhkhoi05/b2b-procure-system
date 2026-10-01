@@ -40,22 +40,81 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
-            "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern) " +
-            "AND (:requireHasPrices = false OR EXISTS (SELECT 1 FROM ProductPrice pp WHERE pp.product.id = p.id))",
+            "AND (:listableOnly = false OR p.isListable = true) " +
+            "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
            countQuery = "SELECT count(p) FROM Product p " +
             "WHERE (:supplierCompanyId IS NULL OR p.supplierCompany.id = :supplierCompanyId) " +
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
-            "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern) " +
-            "AND (:requireHasPrices = false OR EXISTS (SELECT 1 FROM ProductPrice pp WHERE pp.product.id = p.id))")
+            "AND (:listableOnly = false OR p.isListable = true) " +
+            "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)")
     Page<Product> searchProducts(
             @Param("supplierCompanyId") Long supplierCompanyId,
             @Param("categoryId") Long categoryId,
             @Param("status") String status,
             @Param("categoryStatus") String categoryStatus,
             @Param("pattern") String pattern,
-            @Param("requireHasPrices") boolean requireHasPrices,
+            @Param("listableOnly") boolean listableOnly,
+            Pageable pageable
+    );
+
+    // ========================================================================
+    // Slice (no count query) variants for BUYER browse - Tier 2.
+    //
+    // Why fetch pageSize + 1 rows?
+    //   Spring Data's Slice<T> requires `hasNext` which needs to know whether
+    //   there is at least one more row after the current page. The cheapest
+    //   way is to ask the DB for pageSize + 1 rows and check whether we got
+    //   exactly pageSize + 1 back. If yes, trim to pageSize and set hasNext=true.
+    //   If we got fewer (or equal to pageSize), hasNext=false.
+    //
+    //   This avoids the count(p) query, which on 1M rows took 3-8s even with
+    //   a partial index, while keeping the same UX semantics.
+    // ========================================================================
+
+    /**
+     * Slice variant of searchProducts for BUYER (isListable=true enforced).
+     * Returns up to pageSize + 1 Products; service trims and computes hasNext.
+     */
+    @Query(value = "SELECT p FROM Product p " +
+            "JOIN FETCH p.supplierCompany " +
+            "JOIN FETCH p.category " +
+            "WHERE p.isListable = true " +
+            "AND (:supplierCompanyId IS NULL OR p.supplierCompany.id = :supplierCompanyId) " +
+            "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
+            "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
+           countQuery = "SELECT 1")
+    List<Product> searchProductSlice(
+            @Param("supplierCompanyId") Long supplierCompanyId,
+            @Param("categoryId") Long categoryId,
+            @Param("pattern") String pattern,
+            Pageable pageable
+    );
+
+    /**
+     * Slice variant of FTS path for BUYER. Returns up to pageSize + 1 ids;
+     * service trims and computes hasNext.
+     *
+     * The countQuery must be present for Spring Data even though we ignore
+     * the value; SELECT 1 makes it a constant-time no-op.
+     */
+    @Query(value = """
+            SELECT p.id FROM products p
+            JOIN categories c ON c.id = p.category_id
+            WHERE p.is_listable = true
+              AND (:supplierCompanyId IS NULL OR p.supplier_company_id = :supplierCompanyId)
+              AND (:categoryId IS NULL OR p.category_id = :categoryId)
+              AND (cast(:keyword as text) IS NULL
+                   OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
+            ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('vn_simple', :keyword)) DESC, p.id ASC
+            """,
+           countQuery = "SELECT 1",
+           nativeQuery = true)
+    List<Long> searchProductIdsSliceByFts(
+            @Param("supplierCompanyId") Long supplierCompanyId,
+            @Param("categoryId") Long categoryId,
+            @Param("keyword") String keyword,
             Pageable pageable
     );
 
@@ -94,8 +153,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (cast(:categoryStatus as text) IS NULL OR upper(c.status) = :categoryStatus)
               AND (cast(:keyword as text) IS NULL
                    OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
-              AND (:requireHasPrices = false OR EXISTS (
-                    SELECT 1 FROM product_prices pp WHERE pp.product_id = p.id))
+              AND (:requireHasPrices = false OR p.is_listable = true)
             ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('vn_simple', :keyword)) DESC, p.id ASC
             """,
            countQuery = """
@@ -107,8 +165,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (cast(:categoryStatus as text) IS NULL OR upper(c.status) = :categoryStatus)
               AND (cast(:keyword as text) IS NULL
                    OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
-              AND (:requireHasPrices = false OR EXISTS (
-                    SELECT 1 FROM product_prices pp WHERE pp.product_id = p.id))
+              AND (:requireHasPrices = false OR p.is_listable = true)
             """,
            nativeQuery = true)
     Page<Long> searchProductIdsByFts(

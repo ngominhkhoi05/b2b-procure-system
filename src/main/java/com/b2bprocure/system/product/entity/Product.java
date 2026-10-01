@@ -64,6 +64,21 @@ public class Product {
     @Column(name = "status")
     private String status;
 
+    /**
+     * Denormalized visibility flag: true when status='ACTIVE' AND at least
+     * one product_prices row exists. Maintained by DB triggers
+     * (V20__add_is_listable_to_products.sql). Read-only from JPA's
+     * perspective — Hibernate's ddl-auto=validate only checks the column
+     * exists; we never write into this field from application code because
+     * the DB trigger always overrides it on INSERT/UPDATE.
+     *
+     * Used as the predicate for the partial composite index
+     * {@code idx_products_listable_browse} to make BUYER browse fast on
+     * 1M+ rows.
+     */
+    @Column(name = "is_listable", nullable = false)
+    private Boolean isListable = false;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

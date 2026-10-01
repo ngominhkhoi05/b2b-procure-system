@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Getter
@@ -30,5 +31,12 @@ public class ProductResponse {
     private String categoryName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    // ── Price tier summary (populated by ProductServiceImpl.getProducts) ──
+    // Serialised as string to preserve BigDecimal precision (rule §11).
+    // Always null on getProductById() — detail view fetches full tier list separately.
+    private BigDecimal priceFrom;
+    private BigDecimal priceTo;
+    private Integer tierCount;
 
 }
