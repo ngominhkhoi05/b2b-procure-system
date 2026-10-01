@@ -12,6 +12,7 @@ import com.b2bprocure.system.order.repository.OrderRepository;
 import com.b2bprocure.system.order.repository.OrderStatusHistoryRepository;
 import com.b2bprocure.system.payment.entity.Payment;
 import com.b2bprocure.system.payment.repository.PaymentRepository;
+import com.b2bprocure.system.payment.service.RefundService;
 import com.b2bprocure.system.product.entity.Product;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.setting.service.SystemSettingService;
@@ -49,6 +50,7 @@ public class PaymentTimeoutService {
     private final ZaloPayClient zaloPayClient;
     private final ZaloPaySignatureService signatureService;
     private final SystemSettingService systemSettingService;
+    private final RefundService refundService;
 
     /**
      * Scheduled job to process expired ZaloPay payments.
@@ -322,6 +324,45 @@ public class PaymentTimeoutService {
                 log.debug("Released reservation: productId={}, releasedQty={}, newReserved={}",
                         product.getId(), reservedToRelease, newReserved);
             }
+        }
+    }
+
+    /**
+     * Scheduled job to retry pending refunds.
+     * Runs every 5 minutes (same cadence as the other schedulers).
+     *
+     * <p>Picks up payments in REFUND_PENDING that were set by supplier reject or
+     * buyer cancel but whose inline refund call did not complete (e.g. ZaloPay was
+     * unreachable). Delegates each payment to {@link RefundService#processRefund},
+     * which is idempotent and re-checks the status under a pessimistic write lock.
+     */
+    @Scheduled(fixedRate = 300000) // 5 minutes
+    @Transactional
+    public void processPendingRefunds() {
+        log.info("Pending refund scheduler started");
+
+        try {
+            List<Payment> pendingRefunds = paymentRepository.findPendingRefundsWithLock();
+
+            if (pendingRefunds.isEmpty()) {
+                log.debug("No pending refunds to process");
+                return;
+            }
+
+            log.info("Found {} payments awaiting refund", pendingRefunds.size());
+
+            for (Payment payment : pendingRefunds) {
+                try {
+                    refundService.processRefund(payment);
+                } catch (Exception e) {
+                    log.error("Failed to process pending refund: paymentId={}, error={}",
+                            payment.getId(), e.getMessage(), e);
+                }
+            }
+
+            log.info("Pending refund scheduler completed");
+        } catch (Exception e) {
+            log.error("Error in pending refund scheduler: {}", e.getMessage(), e);
         }
     }
 

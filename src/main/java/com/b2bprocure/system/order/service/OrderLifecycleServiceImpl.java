@@ -30,6 +30,7 @@ import com.b2bprocure.system.order.repository.OrderRepository;
 import com.b2bprocure.system.order.repository.OrderStatusHistoryRepository;
 import com.b2bprocure.system.payment.entity.Payment;
 import com.b2bprocure.system.payment.repository.PaymentRepository;
+import com.b2bprocure.system.payment.service.RefundService;
 import com.b2bprocure.system.product.entity.Product;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.user.entity.User;
@@ -76,6 +77,7 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
     private final PaymentSummaryMapper paymentSummaryMapper;
     private final CommissionRateQueryService commissionRateQueryService;
     private final ZaloPayService zaloPayService;
+    private final RefundService refundService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -211,12 +213,16 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Payment", "orderId", orderId));
 
         if (payment.getPaymentMethod() != PaymentMethod.COD && payment.getStatus() == PaymentStatus.SUCCESS) {
-            // Online Paid: transition payment to REFUND_PENDING, DO NOT release reservation
+            // Online Paid: transition payment to REFUND_PENDING, DO NOT release reservation.
+            // RefundService.processRefund will call the ZaloPay refund API; on success it
+            // releases the reservation. On failure the payment stays at REFUND_PENDING and
+            // the pending-refund scheduler will retry.
             payment.setStatus(PaymentStatus.REFUND_PENDING);
             payment.setUpdatedAt(LocalDateTime.now());
             paymentRepository.save(payment);
             log.info("Order rejected with online paid payment: orderId={}, paymentId={}, status changed to REFUND_PENDING (reservation held)",
                     order.getId(), payment.getId());
+            refundService.processRefund(payment);
         } else {
             // COD or Unpaid Online: release reservation immediately
             releaseOrderReservation(order);
@@ -268,12 +274,16 @@ public class OrderLifecycleServiceImpl implements OrderLifecycleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Payment", "orderId", orderId));
 
         if (payment.getPaymentMethod() != PaymentMethod.COD && payment.getStatus() == PaymentStatus.SUCCESS) {
-            // Online Paid: transition payment to REFUND_PENDING, DO NOT release reservation
+            // Online Paid: transition payment to REFUND_PENDING, DO NOT release reservation.
+            // RefundService.processRefund will call the ZaloPay refund API; on success it
+            // releases the reservation. On failure the payment stays at REFUND_PENDING and
+            // the pending-refund scheduler will retry.
             payment.setStatus(PaymentStatus.REFUND_PENDING);
             payment.setUpdatedAt(LocalDateTime.now());
             paymentRepository.save(payment);
             log.info("Order cancelled with online paid payment: orderId={}, paymentId={}, status changed to REFUND_PENDING (reservation held)",
                     order.getId(), payment.getId());
+            refundService.processRefund(payment);
         } else {
             // COD or Unpaid Online: release reservation immediately
             releaseOrderReservation(order);

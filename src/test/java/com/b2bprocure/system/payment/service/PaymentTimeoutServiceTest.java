@@ -11,6 +11,7 @@ import com.b2bprocure.system.order.repository.OrderRepository;
 import com.b2bprocure.system.order.repository.OrderStatusHistoryRepository;
 import com.b2bprocure.system.payment.entity.Payment;
 import com.b2bprocure.system.payment.repository.PaymentRepository;
+import com.b2bprocure.system.payment.service.RefundService;
 import com.b2bprocure.system.product.entity.Product;
 import com.b2bprocure.system.product.repository.ProductRepository;
 import com.b2bprocure.system.setting.service.SystemSettingService;
@@ -72,6 +73,9 @@ class PaymentTimeoutServiceTest {
 
     @Mock
     private SystemSettingService systemSettingService;
+
+    @Mock
+    private RefundService refundService;
 
     @InjectMocks
     private PaymentTimeoutService paymentTimeoutService;

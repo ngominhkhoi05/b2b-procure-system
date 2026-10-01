@@ -63,4 +63,28 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             @Param("status") PaymentStatus status,
             @Param("deadline") LocalDateTime deadline);
 
+    /**
+     * Find all payments currently in REFUND_PENDING state for retry processing.
+     * Used by the pending-refund scheduler to pick up refunds that failed inline
+     * (e.g. ZaloPay API was unreachable when supplier rejected / buyer cancelled).
+     *
+     * <p>Idempotency: RefundService.processRefund re-checks the status under pessimistic
+     * write lock, so duplicate processing between inline call and scheduler is safe.
+     *
+     * <p>No {@code PESSIMISTIC_WRITE} here: it would force Hibernate to merge
+     * the lock into the scheduler's outer transaction and could conflict with the
+     * per-payment lock that {@link RefundServiceImpl#processRefund} acquires on
+     * the same row inside the same transaction. The inner {@code findByIdWithLock}
+     * already serializes per-row writes correctly.
+     *
+     * <p>{@code JOIN FETCH p.order}: required so that
+     * {@code Order order = current.getOrder()} inside {@code RefundServiceImpl}
+     * does not trigger a lazy load outside its transactional boundary (the
+     * scheduler's transaction closes once this query returns).
+     *
+     * @return Payments awaiting refund, oldest first.
+     */
+    @Query("SELECT p FROM Payment p JOIN FETCH p.order o WHERE p.status = com.b2bprocure.system.common.enums.PaymentStatus.REFUND_PENDING ORDER BY p.updatedAt ASC")
+    List<Payment> findPendingRefundsWithLock();
+
 }

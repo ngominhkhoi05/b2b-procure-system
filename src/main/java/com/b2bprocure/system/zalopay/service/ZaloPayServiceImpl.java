@@ -144,11 +144,16 @@ public class ZaloPayServiceImpl implements ZaloPayService {
                     "ZaloPay API returned invalid response: missing order_url");
         }
 
-        // 8. Update Payment with ZaloPay info
+        // 8. Update Payment with ZaloPay identifiers.
+        // IMPORTANT: only persist `app_trans_id` here. Do NOT store `zp_trans_token`
+        // or `order_token` in `provider_transaction_id` — those are redirect tokens
+        // for opening the ZaloPay app, NOT the gateway transaction id. The real
+        // `zp_trans_id` (numeric, e.g. "260930000001825") is only delivered in
+        // the payment-success callback and is what ZaloPay /v2/refund requires.
+        // Saving the token here would cause `RefundServiceImpl.verifyZpTransId`
+        // to skip the refund forever (Long.parseLong fails on a base64 string).
         payment.setAppTransId(appTransId);
-        payment.setProviderTransactionId(
-                zpResponse.getZpTransToken() != null ? zpResponse.getZpTransToken() : zpResponse.getOrderToken()
-        );
+        // Leave providerTransactionId untouched on initiate; callback fills it in.
         payment.setUpdatedAt(LocalDateTime.now());
         paymentRepository.save(payment);
 
@@ -245,13 +250,15 @@ public class ZaloPayServiceImpl implements ZaloPayService {
                 return response;
             }
 
-            // 8. Update Payment to SUCCESS
+            // 8. Update Payment to SUCCESS.
+            // Always overwrite providerTransactionId with the authoritative zp_trans_id
+            // from ZaloPay's callback. Even if a previous bug (or a backfill) had
+            // stored a `zp_trans_token` here, we trust the gateway's id once the
+            // callback MAC has been verified. This is the id required for refunds.
             payment.setStatus(PaymentStatus.SUCCESS);
             payment.setPaidAt(LocalDateTime.now());
             payment.setUpdatedAt(LocalDateTime.now());
-            if (payment.getProviderTransactionId() == null) {
-                payment.setProviderTransactionId(String.valueOf(callbackData.getZpTransId()));
-            }
+            payment.setProviderTransactionId(String.valueOf(callbackData.getZpTransId()));
             paymentRepository.save(payment);
 
             // 9. Update Order to PAID
