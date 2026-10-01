@@ -545,13 +545,225 @@ public class ProductIntegrationTest {
 
     @Test
     @Order(22)
-    @DisplayName("21. Keyword filter works")
+    @DisplayName("21. Keyword filter works (FTS path)")
     void test21_KeywordFilterWorks() throws Exception {
+        // FTS now uses websearch_to_tsquery with the 'vn_simple' config
+        // (which strips diacritics). A keyword present in any of
+        // (name, sku, description) should return matching products.
         mockMvc.perform(get("/api/v1/products?keyword=Supplier Product 1")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-SUPPLIER-001')]", not(empty())))
                 .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-ADMIN-001')]", empty()));
+    }
+
+    @Test
+    @Order(101)
+    @DisplayName("21b. FTS: unaccent matches keyword without diacritics against name with diacritics")
+    void test21b_FtsUnaccentMatches() throws Exception {
+        // Create a product whose name has Vietnamese diacritics.
+        CreateProductRequest request = CreateProductRequest.builder()
+                .supplierCompanyId(supplierCompany1Id)
+                .categoryId(activeCategoryId)
+                .sku("SKU-FTS-UNACCENT")
+                .name("Hộp quà tặng cao cấp")
+                .description("Sản phẩm hot trend 2026")
+                .stockQuantity(10)
+                .build();
+
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        // Search with the same keyword but WITHOUT diacritics. The vn_simple
+        // text search config should strip diacritics and match.
+        mockMvc.perform(get("/api/v1/products?keyword=hop qua")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-UNACCENT')]", not(empty())));
+
+        // And search WITH diacritics must also match.
+        mockMvc.perform(get("/api/v1/products?keyword=hộp quà")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-UNACCENT')]", not(empty())));
+    }
+
+    @Test
+    @Order(102)
+    @DisplayName("21c. FTS: case-insensitive keyword matches mixed-case product names")
+    void test21c_FtsCaseInsensitive() throws Exception {
+        // iPhone 15 already exists from earlier fixtures (created in another test,
+        // or we create one here to guarantee it's there for this test).
+        boolean exists = productRepository.findAll().stream()
+                .anyMatch(p -> "SKU-FTS-CASE".equalsIgnoreCase(p.getSku()));
+        if (!exists) {
+            CreateProductRequest request = CreateProductRequest.builder()
+                    .supplierCompanyId(supplierCompany1Id)
+                    .categoryId(activeCategoryId)
+                    .sku("SKU-FTS-CASE")
+                    .name("iPhone 15 Pro Max")
+                    .description("Apple smartphone flagship")
+                    .stockQuantity(5)
+                    .build();
+
+            mockMvc.perform(post("/api/v1/products")
+                            .header("Authorization", "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isCreated());
+        }
+
+        // Lowercase keyword matches a mixed-case product name.
+        mockMvc.perform(get("/api/v1/products?keyword=iphone")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-CASE')]", not(empty())));
+
+        // Uppercase keyword still matches.
+        mockMvc.perform(get("/api/v1/products?keyword=IPHONE")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-CASE')]", not(empty())));
+    }
+
+    @Test
+    @Order(103)
+    @DisplayName("21d. FTS: ranking by ts_rank puts name match above description-only match")
+    void test21d_FtsRankingByWeight() throws Exception {
+        // Create one product where keyword is in the NAME (weight A),
+        // and one product where keyword is in the DESCRIPTION (weight C).
+        // The FTS path orders by ts_rank DESC, so the name-match should
+        // appear first.
+        String uniqueTag = "zorgon" + System.currentTimeMillis();
+
+        CreateProductRequest nameMatch = CreateProductRequest.builder()
+                .supplierCompanyId(supplierCompany1Id)
+                .categoryId(activeCategoryId)
+                .sku("SKU-FTS-NAME-" + System.currentTimeMillis())
+                .name(uniqueTag + " flagship edition")
+                .description("Generic description without keyword")
+                .stockQuantity(5)
+                .build();
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(nameMatch)))
+                .andExpect(status().isCreated());
+
+        CreateProductRequest descMatch = CreateProductRequest.builder()
+                .supplierCompanyId(supplierCompany1Id)
+                .categoryId(activeCategoryId)
+                .sku("SKU-FTS-DESC-" + System.currentTimeMillis())
+                .name("Plain product name")
+                .description("Detailed marketing copy featuring " + uniqueTag + " prominently")
+                .stockQuantity(5)
+                .build();
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(descMatch)))
+                .andExpect(status().isCreated());
+
+        MvcResult result = mockMvc.perform(get("/api/v1/products?keyword=" + uniqueTag)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()", greaterThanOrEqualTo(2)))
+                .andReturn();
+
+        // Verify ordering: first content item should be the name-match product
+        // (higher weight A vs weight C -> higher ts_rank -> ranked first).
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode content = root.path("data").path("content");
+        String firstSku = content.get(0).path("sku").asText();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                firstSku.startsWith("SKU-FTS-NAME-"),
+                "Expected name-match product (weight A) to rank first, but got SKU " + firstSku
+        );
+    }
+
+    @Test
+    @Order(104)
+    @DisplayName("21e. FTS: websearch_to_tsquery supports phrase + exclusion")
+    void test21e_FtsPhraseAndExclusion() throws Exception {
+        // Create two products with overlapping words so we can test phrase + exclusion.
+        String prefix = "phrf" + System.currentTimeMillis();
+
+        CreateProductRequest req1 = CreateProductRequest.builder()
+                .supplierCompanyId(supplierCompany1Id)
+                .categoryId(activeCategoryId)
+                .sku("SKU-FTS-PHRASE-" + System.currentTimeMillis())
+                .name(prefix + " bulky rugged suitcase")
+                .description("Travel gear")
+                .stockQuantity(5)
+                .build();
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req1)))
+                .andExpect(status().isCreated());
+
+        CreateProductRequest req2 = CreateProductRequest.builder()
+                .supplierCompanyId(supplierCompany1Id)
+                .categoryId(activeCategoryId)
+                .sku("SKU-FTS-RUGGED-" + System.currentTimeMillis())
+                .name(prefix + " rugged jacket")
+                .description("Outdoor apparel")
+                .stockQuantity(5)
+                .build();
+        mockMvc.perform(post("/api/v1/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req2)))
+                .andExpect(status().isCreated());
+
+        // Phrase search: "bulky rugged" must match req1 (both words adjacent in name).
+        mockMvc.perform(get("/api/v1/products?keyword=\"" + prefix + " rugged\"")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-RUGGED-" + System.currentTimeMillis() + "')]", empty()));
+
+        // Exclusion: prefix AND NOT jacket -> only req1 should match.
+        mockMvc.perform(get("/api/v1/products?keyword=" + prefix + " -jacket")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-PHRASE-" + System.currentTimeMillis() + "')]", not(empty())))
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-RUGGED-" + System.currentTimeMillis() + "')]", empty()));
+    }
+
+    @Test
+    @Order(105)
+    @DisplayName("21f. FTS: Buyer role forces ACTIVE/ACTIVE filters on FTS path")
+    void test21f_FtsRespectsBuyerFilters() throws Exception {
+        // Create an INACTIVE product whose name would match a keyword.
+        // Buyer should NOT see it (status filter forced to ACTIVE on Buyer).
+        String uniqueTag = "buyeronly" + System.currentTimeMillis();
+
+        Product inactive = new Product();
+        inactive.setSupplierCompany(companyRepository.findById(supplierCompany1Id).orElseThrow());
+        inactive.setCategory(categoryRepository.findById(activeCategoryId).orElseThrow());
+        inactive.setSku("SKU-FTS-INACTIVE-" + System.currentTimeMillis());
+        inactive.setName(uniqueTag + " hidden product");
+        inactive.setDescription("Should not be visible to buyers");
+        inactive.setStockQuantity(5);
+        inactive.setStatus("INACTIVE");
+        inactive.setCreatedAt(LocalDateTime.now());
+        inactive.setUpdatedAt(LocalDateTime.now());
+        productRepository.save(inactive);
+
+        // Admin sees it (no status filter forced).
+        mockMvc.perform(get("/api/v1/products?keyword=" + uniqueTag)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-INACTIVE-" + System.currentTimeMillis() + "')]", not(empty())));
+
+        // Buyer must NOT see it.
+        mockMvc.perform(get("/api/v1/products?keyword=" + uniqueTag)
+                        .header("Authorization", "Bearer " + buyerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-INACTIVE-" + System.currentTimeMillis() + "')]", empty()));
     }
 
     @Test

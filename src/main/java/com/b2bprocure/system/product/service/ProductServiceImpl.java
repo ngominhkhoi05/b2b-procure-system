@@ -28,6 +28,7 @@ import com.b2bprocure.system.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -36,7 +37,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -189,29 +194,83 @@ public class ProductServiceImpl implements ProductService {
             throw new AccessDeniedException("Access denied: You do not have permission to view products");
         }
 
-        String pattern = (request.getKeyword() != null && !request.getKeyword().isBlank())
-                ? "%" + request.getKeyword().trim().toLowerCase() + "%"
-                : null;
-
         // For Buyer: require at least one price_product to be visible
         // For Admin/Supplier: see all products (no price requirement)
         boolean requireHasPrices = isBuyer;
 
-        Page<Product> productPage = productRepository.searchProducts(
-                supplierCompanyId,
-                categoryId,
-                status,
-                categoryStatus,
-                pattern,
-                requireHasPrices,
-                pageable
-        );
+        // Keyword is the trigger that switches between LIKE (small data, low cost)
+        // and FTS (1M scale, GIN index). Trim once here so both paths share the
+        // exact same input. Empty / blank keyword -> null = no search applied.
+        String keyword = (request.getKeyword() != null && !request.getKeyword().isBlank())
+                ? request.getKeyword().trim()
+                : null;
 
-        List<ProductResponse> content = productPage.getContent().stream()
+        // Step 1: page over ids. Two paths:
+        //   - keyword present -> FTS (Postgres websearch_to_tsquery + ts_rank)
+        //   - keyword absent  -> existing JPQL filter-only search (unchanged)
+        List<Long> ids;
+        long totalElements;
+
+        if (keyword != null) {
+            // The FTS query has its own ORDER BY (ts_rank DESC). If we let the
+            // caller's Pageable.sort through, Spring Data will append another
+            // ORDER BY clause and Postgres will reject the query. Strip sort
+            // for this path; ranking is the only ordering that makes sense
+            // when a keyword is present.
+            Pageable ftsPageable = PageRequest.of(
+                    pageable.getPageNumber(),
+                    pageable.getPageSize()
+            );
+            Page<Long> idPage = productRepository.searchProductIdsByFts(
+                    supplierCompanyId,
+                    categoryId,
+                    status,
+                    categoryStatus,
+                    keyword,
+                    requireHasPrices,
+                    ftsPageable
+            );
+            ids = idPage.getContent();
+            totalElements = idPage.getTotalElements();
+        } else {
+            Page<Product> productPage = productRepository.searchProducts(
+                    supplierCompanyId,
+                    categoryId,
+                    status,
+                    categoryStatus,
+                    null,
+                    requireHasPrices,
+                    pageable
+            );
+            ids = productPage.getContent().stream().map(Product::getId).toList();
+            totalElements = productPage.getTotalElements();
+        }
+
+        // Step 2: batch fetch Products with relationships in 1 SQL query
+        // (regardless of page size). Skip when ids is empty so we do not
+        // issue a "WHERE id IN ()" query which is invalid in some DBs.
+        if (ids.isEmpty()) {
+            return PageResponse.of(List.of(), pageable, totalElements);
+        }
+
+        List<Product> products = productRepository.findAllByIdInWithDetails(ids);
+
+        // Reorder to match the ranking returned by FTS. The JPQL findAllByIdInWithDetails
+        // does not preserve the caller's ordering (Hibernate returns rows in an
+        // unspecified order); for the FTS path the ordering is meaningful (ts_rank DESC),
+        // so we restore it here.
+        Map<Long, Product> byId = products.stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<Product> ordered = ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+
+        List<ProductResponse> content = ordered.stream()
                 .map(productMapper::toResponse)
                 .toList();
 
-        return PageResponse.of(productPage, content);
+        return PageResponse.of(content, pageable, totalElements);
     }
 
     @Override
