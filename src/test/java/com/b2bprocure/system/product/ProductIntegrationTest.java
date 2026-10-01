@@ -1,9 +1,14 @@
 package com.b2bprocure.system.product;
 
+import com.b2bprocure.system.cart.repository.CartItemRepository;
 import com.b2bprocure.system.category.entity.Category;
 import com.b2bprocure.system.category.repository.CategoryRepository;
 import com.b2bprocure.system.company.entity.Company;
 import com.b2bprocure.system.company.repository.CompanyRepository;
+import com.b2bprocure.system.order.repository.OrderItemRepository;
+import com.b2bprocure.system.order.repository.OrderRepository;
+import com.b2bprocure.system.order.repository.OrderStatusHistoryRepository;
+import com.b2bprocure.system.payment.repository.PaymentRepository;
 import com.b2bprocure.system.product.dto.CreateProductPriceRequest;
 import com.b2bprocure.system.product.dto.CreateProductRequest;
 import com.b2bprocure.system.product.dto.ProductStatusUpdateRequest;
@@ -84,6 +89,26 @@ public class ProductIntegrationTest {
     @Autowired
     private ProductPriceRepository productPriceRepository;
 
+    // The following repos are required by setUp() to cascade-clean dependent
+    // tables before deleting Products (FK fk_order_items_product etc.).
+    // Without these, leftover rows from other test classes (orders created
+    // by OrderIntegrationTest, CheckoutIntegrationTest etc.) block the
+    // deleteAll() with a ConstraintViolationException.
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private OrderStatusHistoryRepository orderStatusHistoryRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
+    private CartItemRepository cartItemRepository;
+
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
@@ -102,6 +127,14 @@ public class ProductIntegrationTest {
     private static Long supplier1InactiveProductId;
     private static Long supplier1InactiveCatProductId;
     private static Long supplier2ProductId;
+    /**
+     * Fixture product with a price tier, dedicated for Buyer-access tests
+     * (test 16, test 27). Lives in the {@code test11b_SetupFixtures} method
+     * and is created BEFORE the Buyer-visibility tests run, so we do not
+     * need to depend on the Order-44+ price setup for {@code supplier1ActiveProductId}.
+     */
+    private static Long buyerFixtureProductId;
+    private static final String BUYER_FIXTURE_SKU = "SKU-BUYER-FIXTURE";
     private static Long samplePriceId;
 
     private static boolean initialized = false;
@@ -113,6 +146,15 @@ public class ProductIntegrationTest {
                 .build();
 
         if (!initialized) {
+            // Cascade-clean dependent tables before deleting Products so we
+            // don't violate FKs (fk_order_items_product, fk_payments_order,
+            // fk_order_status_history_order, etc.). Order matters: child rows
+            // before parent rows.
+            paymentRepository.deleteAll();
+            orderStatusHistoryRepository.deleteAll();
+            orderItemRepository.deleteAll();
+            orderRepository.deleteAll();
+            cartItemRepository.deleteAll();
             productPriceRepository.deleteAll();
             productRepository.deleteAll();
 
@@ -444,6 +486,32 @@ public class ProductIntegrationTest {
         pInactCat.setCreatedAt(LocalDateTime.now());
         pInactCat.setUpdatedAt(LocalDateTime.now());
         supplier1InactiveCatProductId = productRepository.save(pInactCat).getId();
+
+        // Buyer fixture: ACTIVE product (with price) so Buyer-visibility tests
+        // (test 16, test 27) can find it independently of the Order-44+ price
+        // setup for {@code supplier1ActiveProductId}. The Buyer API requires
+        // products to have at least one price tier to be visible — see
+        // requireHasPrices flag in ProductServiceImpl.getProducts().
+        Product buyerFixture = new Product();
+        buyerFixture.setSupplierCompany(companyRepository.findById(supplierCompany1Id).orElseThrow());
+        buyerFixture.setCategory(categoryRepository.findById(activeCategoryId).orElseThrow());
+        buyerFixture.setSku(BUYER_FIXTURE_SKU);
+        buyerFixture.setName("Buyer Fixture Product");
+        buyerFixture.setDescription("Dedicated fixture for Buyer visibility tests");
+        buyerFixture.setStockQuantity(50);
+        buyerFixture.setStatus("ACTIVE");
+        buyerFixture.setCreatedAt(LocalDateTime.now());
+        buyerFixture.setUpdatedAt(LocalDateTime.now());
+        buyerFixtureProductId = productRepository.save(buyerFixture).getId();
+
+        ProductPrice buyerPrice = new ProductPrice();
+        buyerPrice.setProduct(productRepository.findById(buyerFixtureProductId).orElseThrow());
+        buyerPrice.setMinQuantity(1);
+        buyerPrice.setMaxQuantity(1);
+        buyerPrice.setUnitPrice(new BigDecimal("50000.00"));
+        buyerPrice.setCreatedAt(LocalDateTime.now());
+        buyerPrice.setUpdatedAt(LocalDateTime.now());
+        productPriceRepository.save(buyerPrice);
     }
 
     // ========================================================================
@@ -497,7 +565,10 @@ public class ProductIntegrationTest {
         mockMvc.perform(get("/api/v1/products")
                         .header("Authorization", "Bearer " + buyerToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-SUPPLIER-001')]", not(empty())));
+                // SKU-BUYER-FIXTURE is the dedicated ACTIVE product with a
+                // price tier created in test11b_SetupFixtures (Order 12),
+                // so it satisfies requireHasPrices=true for Buyer.
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + BUYER_FIXTURE_SKU + "')]", not(empty())));
     }
 
     @Test
@@ -688,13 +759,30 @@ public class ProductIntegrationTest {
     @Order(104)
     @DisplayName("21e. FTS: websearch_to_tsquery supports phrase + exclusion")
     void test21e_FtsPhraseAndExclusion() throws Exception {
-        // Create two products with overlapping words so we can test phrase + exclusion.
+        // Create two products whose names contain DIFFERENT phrases that
+        // share one common word, so we can test:
+        //   (a) phrase match (quoted, e.g. "bulky rugged") matches only the
+        //       product that has those words adjacent, NOT the other one
+        //       that has only one of them.
+        //   (b) exclusion (`-jacket`) excludes any product whose token
+        //       stream contains "jacket".
         String prefix = "phrf" + System.currentTimeMillis();
 
+        // Capture SKUs in local variables — DO NOT call
+        // System.currentTimeMillis() again at assert time, otherwise the
+        // captured SKU and the asserted SKU differ by a few milliseconds
+        // and the JsonPath filter silently finds zero matches.
+        String skuPhrase = "SKU-FTS-PHRASE-" + System.currentTimeMillis();
+        String skuRugged = "SKU-FTS-RUGGED-" + System.currentTimeMillis();
+
+        // req1: name = "<prefix> bulky rugged suitcase"
+        //        — contains the adjacent phrase "bulky rugged".
+        // req2: name = "<prefix> rugged jacket"
+        //        — contains the adjacent phrase "rugged jacket" but NOT "bulky rugged".
         CreateProductRequest req1 = CreateProductRequest.builder()
                 .supplierCompanyId(supplierCompany1Id)
                 .categoryId(activeCategoryId)
-                .sku("SKU-FTS-PHRASE-" + System.currentTimeMillis())
+                .sku(skuPhrase)
                 .name(prefix + " bulky rugged suitcase")
                 .description("Travel gear")
                 .stockQuantity(5)
@@ -708,7 +796,7 @@ public class ProductIntegrationTest {
         CreateProductRequest req2 = CreateProductRequest.builder()
                 .supplierCompanyId(supplierCompany1Id)
                 .categoryId(activeCategoryId)
-                .sku("SKU-FTS-RUGGED-" + System.currentTimeMillis())
+                .sku(skuRugged)
                 .name(prefix + " rugged jacket")
                 .description("Outdoor apparel")
                 .stockQuantity(5)
@@ -719,18 +807,22 @@ public class ProductIntegrationTest {
                         .content(objectMapper.writeValueAsString(req2)))
                 .andExpect(status().isCreated());
 
-        // Phrase search: "bulky rugged" must match req1 (both words adjacent in name).
-        mockMvc.perform(get("/api/v1/products?keyword=\"" + prefix + " rugged\"")
+        // Phrase search: "bulky rugged" must match req1 only.
+        // req2 has "rugged" but NOT adjacent to "bulky", so the phrase
+        // match must exclude it.
+        mockMvc.perform(get("/api/v1/products?keyword=\"bulky rugged\"")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-RUGGED-" + System.currentTimeMillis() + "')]", empty()));
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuPhrase + "')]", not(empty())))
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuRugged + "')]", empty()));
 
-        // Exclusion: prefix AND NOT jacket -> only req1 should match.
+        // Exclusion: "<prefix> -jacket" must match req1 (no "jacket" token)
+        // and exclude req2 (which contains "jacket").
         mockMvc.perform(get("/api/v1/products?keyword=" + prefix + " -jacket")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-PHRASE-" + System.currentTimeMillis() + "')]", not(empty())))
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-RUGGED-" + System.currentTimeMillis() + "')]", empty()));
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuPhrase + "')]", not(empty())))
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuRugged + "')]", empty()));
     }
 
     @Test
@@ -741,10 +833,15 @@ public class ProductIntegrationTest {
         // Buyer should NOT see it (status filter forced to ACTIVE on Buyer).
         String uniqueTag = "buyeronly" + System.currentTimeMillis();
 
+        // Capture SKU in a local variable — same reason as test21e:
+        // System.currentTimeMillis() at create-time and assert-time would
+        // differ and the JsonPath filter would silently find nothing.
+        String skuInactive = "SKU-FTS-INACTIVE-" + System.currentTimeMillis();
+
         Product inactive = new Product();
         inactive.setSupplierCompany(companyRepository.findById(supplierCompany1Id).orElseThrow());
         inactive.setCategory(categoryRepository.findById(activeCategoryId).orElseThrow());
-        inactive.setSku("SKU-FTS-INACTIVE-" + System.currentTimeMillis());
+        inactive.setSku(skuInactive);
         inactive.setName(uniqueTag + " hidden product");
         inactive.setDescription("Should not be visible to buyers");
         inactive.setStockQuantity(5);
@@ -757,13 +854,13 @@ public class ProductIntegrationTest {
         mockMvc.perform(get("/api/v1/products?keyword=" + uniqueTag)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-INACTIVE-" + System.currentTimeMillis() + "')]", not(empty())));
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuInactive + "')]", not(empty())));
 
         // Buyer must NOT see it.
         mockMvc.perform(get("/api/v1/products?keyword=" + uniqueTag)
                         .header("Authorization", "Bearer " + buyerToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[?(@.sku == 'SKU-FTS-INACTIVE-" + System.currentTimeMillis() + "')]", empty()));
+                .andExpect(jsonPath("$.data.content[?(@.sku == '" + skuInactive + "')]", empty()));
     }
 
     @Test
@@ -825,10 +922,15 @@ public class ProductIntegrationTest {
     @Order(28)
     @DisplayName("27. Buyer views ACTIVE Product")
     void test27_BuyerViewsActiveProduct() throws Exception {
-        mockMvc.perform(get("/api/v1/products/" + supplier1ActiveProductId)
+        // Use the Buyer fixture (created in test11b_SetupFixtures) because
+        // it has a price tier — supplier1ActiveProductId has no price yet
+        // at this Order (28), so the Buyer path would 404 on
+        // requireHasPrices. The fixture is exactly the Buyer-visible
+        // ACTIVE product we want to assert against.
+        mockMvc.perform(get("/api/v1/products/" + buyerFixtureProductId)
                         .header("Authorization", "Bearer " + buyerToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.id", is(supplier1ActiveProductId.intValue())));
+                .andExpect(jsonPath("$.data.id", is(buyerFixtureProductId.intValue())));
     }
 
     @Test
@@ -1536,9 +1638,20 @@ public class ProductIntegrationTest {
 
     @AfterAll
     static void tearDown(
+            @Autowired PaymentRepository paymentRepository,
+            @Autowired OrderStatusHistoryRepository orderStatusHistoryRepository,
+            @Autowired OrderItemRepository orderItemRepository,
+            @Autowired OrderRepository orderRepository,
+            @Autowired CartItemRepository cartItemRepository,
             @Autowired ProductPriceRepository productPriceRepository,
             @Autowired ProductRepository productRepository
     ) {
+        // Cascade-clean (same order as setUp) — child rows before parent rows.
+        paymentRepository.deleteAll();
+        orderStatusHistoryRepository.deleteAll();
+        orderItemRepository.deleteAll();
+        orderRepository.deleteAll();
+        cartItemRepository.deleteAll();
         productPriceRepository.deleteAll();
         productRepository.deleteAll();
     }
