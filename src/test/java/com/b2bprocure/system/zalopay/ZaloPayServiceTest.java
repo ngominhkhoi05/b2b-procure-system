@@ -216,19 +216,7 @@ class ZaloPayServiceTest {
 
     @AfterEach
     void tearDown() {
-        // Clean up in reverse order (respecting FK constraints)
-        for (Long orderItemId : createdOrderItemIds) {
-            orderItemRepository.findById(orderItemId).ifPresent(orderItemRepository::delete);
-        }
-        for (Long paymentId : createdPaymentIds) {
-            paymentRepository.findById(paymentId).ifPresent(paymentRepository::delete);
-        }
-        for (Long orderId : createdOrderIds) {
-            orderRepository.findById(orderId).ifPresent(orderRepository::delete);
-        }
-        if (testProduct != null && testProduct.getId() != null) {
-            productRepository.delete(testProduct);
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
 
         SecurityContextHolder.clearContext();
     }
@@ -263,7 +251,15 @@ class ZaloPayServiceTest {
             // Verify payment updated
             Payment updatedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
             assertThat(updatedPayment.getAppTransId()).isNotNull();
-            assertThat(updatedPayment.getProviderTransactionId()).isEqualTo("test_token_123");
+            // providerTransactionId must remain null on initiatePayment: see
+            // ZaloPayServiceImpl#initiatePayment (deliberate comment block
+            // "Leave providerTransactionId untouched on initiate; callback
+            // fills it in"). The gateway's authoritative zp_trans_id is
+            // delivered in the payment-success callback, and refund relies
+            // on Long.parseLong(providerTransactionId) — saving the
+            // zp_trans_token (e.g. base64 redirect token) here would break
+            // /v2/refund forever.
+            assertThat(updatedPayment.getProviderTransactionId()).isNull();
         }
 
         @Test

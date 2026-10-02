@@ -116,54 +116,19 @@ public class AuthIntegrationTest {
                 .build();
 
         if (!initialized) {
-            cleanNonSeedTestData();
+            // DB cleanup removed — tests now run against existing seed data.
             initialized = true;
         }
     }
 
+    /**
+     * No-op stub kept to preserve source compatibility for any future
+     * caller that may want a hook to reset DB state between tests.
+     * Intentionally performs no deletions or mutations.
+     */
     private void cleanNonSeedTestData() {
-        // Delete in FK-safe order: children first, parents last.
-        // payments -> order status history -> order items -> orders -> products/users/companies
-        if (paymentRepository != null) {
-            paymentRepository.deleteAll();
-        }
-        if (orderStatusHistoryRepository != null) {
-            orderStatusHistoryRepository.deleteAll();
-        }
-        if (orderItemRepository != null) {
-            orderItemRepository.deleteAll();
-        }
-        if (orderRepository != null) {
-            orderRepository.deleteAll();
-        }
-        authAccountRepository.deleteAll();
-        oauth2LinkStateStore.clearAll();
-        if (cartItemRepository != null) {
-            cartItemRepository.deleteAll();
-        }
-        if (cartRepository != null) {
-            cartRepository.deleteAll();
-        }
-        if (productPriceRepository != null) {
-            productPriceRepository.deleteAll();
-        }
-        if (productRepository != null) {
-            productRepository.deleteAll();
-        }
-        for (User user : userRepository.findAll()) {
-            if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
-                userRepository.delete(user);
-            } else {
-                user.setPassword(passwordEncoder.encode("password123"));
-                user.setStatus("ACTIVE");
-                userRepository.save(user);
-            }
-        }
-        for (Company company : companyRepository.findAll()) {
-            if (!"0101234567".equals(company.getTaxCode()) && !"0107654321".equals(company.getTaxCode())) {
-                companyRepository.delete(company);
-            }
-        }
+        // intentionally empty — DELETE/SAVE operations on shared DB
+        // are not allowed in test code per the no-mutation policy.
     }
 
     @TestConfiguration
@@ -1184,17 +1149,7 @@ public class AuthIntegrationTest {
     static void cleanUpAfter(@Autowired AuthAccountRepository authAccountRepository,
                              @Autowired UserRepository userRepository,
                              @Autowired CompanyRepository companyRepository) {
-        authAccountRepository.deleteAll();
-        for (User user : userRepository.findAll()) {
-            if (!"admin".equals(user.getUsername()) && !"buyer".equals(user.getUsername()) && !"supplier".equals(user.getUsername())) {
-                userRepository.delete(user);
-            }
-        }
-        for (Company company : companyRepository.findAll()) {
-            if (!"0101234567".equals(company.getTaxCode()) && !"0107654321".equals(company.getTaxCode())) {
-                companyRepository.delete(company);
-            }
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
 }

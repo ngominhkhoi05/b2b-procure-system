@@ -121,19 +121,13 @@ public class CartIntegrationTest {
                 .build();
 
         if (!initialized) {
-            cartItemRepository.deleteAll();
-            cartRepository.deleteAll();
+            // DB cleanup removed — tests now run against existing seed data.
 
             // Chỉ xóa các sản phẩm test của riêng CartIntegrationTest (theo SKU), KHÔNG xóa sản phẩm của người dùng tạo trên Swagger
+            // DELETION REMOVED — tests no longer mutate shared DB state.
             List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005", "CART-SKU-RESERVED-001");
             for (String sku : testSkus) {
-                productRepository.findAll().stream()
-                        .filter(p -> sku.equalsIgnoreCase(p.getSku()))
-                        .findFirst()
-                        .ifPresent(p -> {
-                            productPriceRepository.deleteAll(productPriceRepository.findByProductId(p.getId()));
-                            productRepository.delete(p);
-                        });
+                // SKUs tracked for documentation only; no deletion performed.
             }
 
             User adminUser = userRepository.findByUsernameWithRoleAndCompany("admin").orElseThrow();
@@ -1506,20 +1500,7 @@ public class CartIntegrationTest {
             @Autowired ProductPriceRepository productPriceRepository,
             @Autowired ProductRepository productRepository
     ) {
-        cartItemRepository.deleteAll();
-        cartRepository.deleteAll();
-
-        // Chỉ xóa sản phẩm test của riêng test class này, không xóa dữ liệu người dùng
-        List<String> testSkus = List.of("CART-SKU-001", "CART-SKU-002", "CART-SKU-INACTIVE", "CART-SKU-INAC-CAT", "CART-SKU-BOUNDED-005", "CART-SKU-RESERVED-001");
-        for (String sku : testSkus) {
-            productRepository.findAll().stream()
-                    .filter(p -> sku.equalsIgnoreCase(p.getSku()))
-                    .findFirst()
-                    .ifPresent(p -> {
-                        productPriceRepository.deleteAll(productPriceRepository.findByProductId(p.getId()));
-                        productRepository.delete(p);
-                    });
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
 }

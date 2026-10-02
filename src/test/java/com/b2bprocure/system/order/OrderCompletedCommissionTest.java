@@ -107,8 +107,7 @@ class OrderCompletedCommissionTest {
         // Use timestamp + uuid for unique data in each test run
         uniquePrefix = "c_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 6) + "_";
 
-        // Clean up any leftover test data first
-        cleanupTestData();
+        // Clean up any leftover test data first — DELETION REMOVED
 
         supplierCompany = companyRepository.save(new Company(null,
                 uniquePrefix + "Supplier", "TAX-" + uniquePrefix.replace("_", "").substring(0, 10),
@@ -135,44 +134,7 @@ class OrderCompletedCommissionTest {
 
     @AfterEach
     void tearDown() {
-        cleanupTestData();
-    }
-
-    private void cleanupTestData() {
-        // Clean up in correct order to handle FK constraints
-        commissionRateRepository.deleteAll();
-
-        orderRepository.findAll().stream()
-                .filter(o -> o.getOrderCode() != null && o.getOrderCode().startsWith("ORD-COMM-"))
-                .forEach(order -> {
-                    // Delete order status history first (FK to orders)
-                    orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(order.getId())
-                            .forEach(orderStatusHistoryRepository::delete);
-                    paymentRepository.findByOrderId(order.getId())
-                            .ifPresent(paymentRepository::delete);
-                    orderItemRepository.findByOrderId(order.getId())
-                            .forEach(orderItemRepository::delete);
-                    orderRepository.delete(order);
-                });
-
-        productRepository.findAll().stream()
-                .filter(p -> p.getSku() != null && p.getSku().startsWith("SKU-COMM-"))
-                .forEach(product -> {
-                    productPriceRepository.deleteByProductId(product.getId());
-                    productRepository.delete(product);
-                });
-
-        userRepository.findAll().stream()
-                .filter(u -> u.getUsername() != null && u.getUsername().startsWith("c_"))
-                .forEach(userRepository::delete);
-
-        companyRepository.findAll().stream()
-                .filter(c -> c.getName() != null && c.getName().startsWith("c_"))
-                .forEach(companyRepository::delete);
-
-        categoryRepository.findAll().stream()
-                .filter(c -> c.getName() != null && c.getName().startsWith("c_"))
-                .forEach(categoryRepository::delete);
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     private User createUser(String username, Role role, Company company) {

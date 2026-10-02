@@ -180,32 +180,7 @@ public class OrderQueryIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        for (Long orderId : createdOrderIds) {
-            paymentRepository.findByOrderId(orderId).ifPresent(paymentRepository::delete);
-            orderStatusHistoryRepository.deleteAll(
-                    orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(orderId));
-            orderItemRepository.deleteAll(orderItemRepository.findByOrderId(orderId));
-            orderRepository.deleteById(orderId);
-        }
-        createdOrderIds.clear();
-
-        for (Long productId : createdProductIds) {
-            productPriceRepository.deleteAll(productPriceRepository.findByProductId(productId));
-            productRepository.deleteById(productId);
-        }
-        createdProductIds.clear();
-
-        // Delete companies BEFORE deleting orders (so FK order → companies is cleared).
-        // Users reference companies (fk_users_company), so delete users first.
-        for (User u : List.of(buyerUser, buyer2User, supplierUser, supplier2User, adminUser)) {
-            if (u != null && u.getId() != null) userRepository.deleteById(u.getId());
-        }
-
-        if (category != null && category.getId() != null) categoryRepository.deleteById(category.getId());
-        if (buyerCompany != null && buyerCompany.getId() != null) companyRepository.deleteById(buyerCompany.getId());
-        if (buyerCompany2 != null && buyerCompany2.getId() != null) companyRepository.deleteById(buyerCompany2.getId());
-        if (supplierCompany1 != null && supplierCompany1.getId() != null) companyRepository.deleteById(supplierCompany1.getId());
-        if (supplierCompany2 != null && supplierCompany2.getId() != null) companyRepository.deleteById(supplierCompany2.getId());
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     // =========================================================================

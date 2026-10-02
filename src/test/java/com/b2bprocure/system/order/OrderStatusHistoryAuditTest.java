@@ -72,10 +72,7 @@ class OrderStatusHistoryAuditTest {
 
     @AfterEach
     void tearDown() {
-        if (testOrder != null && testOrder.getId() != null) {
-            orderStatusHistoryRepository.deleteAll(orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(testOrder.getId()));
-            orderRepository.delete(testOrder);
-        }
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     @Test

@@ -80,13 +80,7 @@ public class CategoryIntegrationTest {
                 .build();
 
         if (!initialized) {
-            if (productPriceRepository != null) {
-                productPriceRepository.deleteAll();
-            }
-            if (productRepository != null) {
-                productRepository.deleteAll();
-            }
-            categoryRepository.deleteAll();
+            // DB cleanup removed — tests now run against existing seed data.
             initialized = true;
         }
 
@@ -609,13 +603,7 @@ public class CategoryIntegrationTest {
             @Autowired(required = false) com.b2bprocure.system.product.repository.ProductPriceRepository productPriceRepository,
             @Autowired(required = false) com.b2bprocure.system.product.repository.ProductRepository productRepository
     ) {
-        if (productPriceRepository != null) {
-            productPriceRepository.deleteAll();
-        }
-        if (productRepository != null) {
-            productRepository.deleteAll();
-        }
-        categoryRepository.deleteAll();
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
 }

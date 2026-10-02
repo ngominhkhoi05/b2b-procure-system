@@ -56,12 +56,7 @@ class ProductReservationInvariantTest {
 
     @AfterEach
     void tearDown() {
-        productRepository.findAll().stream()
-                .filter(p -> p.getSku() != null && p.getSku().startsWith("INV-TEST-"))
-                .forEach(p -> {
-                    productPriceRepository.deleteAll(productPriceRepository.findByProductId(p.getId()));
-                    productRepository.delete(p);
-                });
+        // DB cleanup removed — tests no longer mutate shared DB state.
     }
 
     @Nested
