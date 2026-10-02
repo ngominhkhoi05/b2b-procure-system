@@ -11,6 +11,20 @@ spring:
   flyway:
     enabled: true
 
+# Spring Boot Actuator — only expose health & info for the container
+# healthcheck. Details are hidden when unauthorized so this does not
+# expose sensitive component data to anonymous callers.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+
 jwt:
   secret: ${JWT_SECRET}
 
