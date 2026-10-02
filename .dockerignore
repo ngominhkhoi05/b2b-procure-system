@@ -1,0 +1,63 @@
+# =============================================================================
+# .dockerignore for b2b-procure-system
+# Reduces build context size and keeps the Docker layer cache clean.
+# =============================================================================
+
+### --- Gradle build outputs ---
+.gradle/
+build/
+bin/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+### --- Local config / secrets (NEVER bake into the image) ---
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.properties
+application-secret.yml
+*.key
+*.pem
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.crt
+
+### --- Logs, runtime, uploads ---
+*.log
+logs/
+tmp/
+temp/
+uploads/
+storage/
+attachments/
+media/
+
+### --- IDE / editor metadata ---
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.fleet/
+.cursor/
+
+### --- OS junk ---
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+*~
+
+### --- Project-specific excludes ---
+# AI / agent metadata that lives in the repo
+AGENTS.md
+PROJECT_STATUS.md
+docs/
+HELP.md
+
+# Local Python data generator (not needed at build/runtime)
+script_python/
