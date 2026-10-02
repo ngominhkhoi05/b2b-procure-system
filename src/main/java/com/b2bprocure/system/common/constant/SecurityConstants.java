@@ -34,6 +34,13 @@ public final class SecurityConstants {
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
+            // Spring Boot Actuator — required for Docker healthcheck.
+            // Only health/info are exposed in application-prod.yml; details
+            // are hidden when unauthorized so we permitAll them at the
+            // Security layer to keep the container healthcheck reachable.
+            "/actuator/health",
+            "/actuator/health/**",
+            "/actuator/info",
             "/error"
     };
 }
