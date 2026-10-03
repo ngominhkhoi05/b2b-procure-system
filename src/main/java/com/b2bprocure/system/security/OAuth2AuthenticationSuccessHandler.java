@@ -3,8 +3,10 @@ package com.b2bprocure.system.security;
 import com.b2bprocure.system.authaccount.entity.AuthAccount;
 import com.b2bprocure.system.authaccount.repository.AuthAccountRepository;
 import com.b2bprocure.system.common.enums.AuthProvider;
+import com.b2bprocure.system.common.exception.ResourceNotFoundException;
 import com.b2bprocure.system.config.JwtConfig;
 import com.b2bprocure.system.user.entity.User;
+import com.b2bprocure.system.user.repository.UserRepository;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,6 +30,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthAccountRepository authAccountRepository;
+    private final UserRepository userRepository;
     private final JwtConfig jwtConfig;
     private final OAuth2LinkStateStore oauth2LinkStateStore;
 
@@ -165,7 +168,24 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
             User user = authAccountOpt.get().getUser();
             log.info("Found existing AuthAccount linked to User id: {}, username: {}", user.getId(), user.getUsername());
 
-            UserPrincipal userPrincipal = UserPrincipal.create(user);
+            // Reload user with role + company so we can check company.status.
+            // The AuthAccount.getUser() may not have the Company association initialized.
+            User reloadedUser = userRepository.findByIdWithRoleAndCompany(user.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", user.getId()));
+
+            UserPrincipal userPrincipal = UserPrincipal.create(reloadedUser);
+
+            // Block OAuth2 login when the user's company is INACTIVE.
+            // Mirrors AuthServiceImpl.login() so behaviour stays consistent.
+            if (!userPrincipal.isCompanyActive()) {
+                log.warn("OAuth2 login blocked for user {}: company {} is not active",
+                        userPrincipal.getId(), userPrincipal.getCompanyId());
+                return UriComponentsBuilder.fromUriString(baseRedirectUri)
+                        .queryParam("status", "ERROR")
+                        .queryParam("error", "company_inactive")
+                        .build().toUriString();
+            }
+
             String accessToken = jwtTokenProvider.generateToken(userPrincipal);
 
             return UriComponentsBuilder.fromUriString(baseRedirectUri)

@@ -189,6 +189,19 @@ public class AuthServiceImpl implements AuthService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+
+        // Block login when the user's company is INACTIVE. ADMIN users without
+        // a company are always allowed (isCompanyActive returns true for them).
+        if (!userPrincipal.isCompanyActive()) {
+            SecurityContextHolder.clearContext();
+            log.warn("Login blocked for user {}: company {} is not active",
+                    userPrincipal.getId(), userPrincipal.getCompanyId());
+            throw new BusinessException(
+                    "Your company is inactive. Please contact platform administrator.",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+
         String accessToken = jwtTokenProvider.generateToken(userPrincipal);
 
         log.info("User {} successfully authenticated with role {}", userPrincipal.getUsername(), userPrincipal.getRole());

@@ -34,20 +34,23 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByIdInWithLock(@Param("ids") List<Long> ids);
 
     @Query(value = "SELECT p FROM Product p " +
-            "JOIN FETCH p.supplierCompany " +
+            "JOIN FETCH p.supplierCompany sc " +
             "JOIN FETCH p.category " +
-            "WHERE (:supplierCompanyId IS NULL OR p.supplierCompany.id = :supplierCompanyId) " +
+            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " +
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
             "AND (:listableOnly = false OR p.isListable = true) " +
+            "AND (:supplierCompanyMustBeActive = false OR UPPER(sc.status) = 'ACTIVE') " +
             "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
            countQuery = "SELECT count(p) FROM Product p " +
-            "WHERE (:supplierCompanyId IS NULL OR p.supplierCompany.id = :supplierCompanyId) " +
+            "JOIN p.supplierCompany sc " +
+            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " +
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
             "AND (:listableOnly = false OR p.isListable = true) " +
+            "AND (:supplierCompanyMustBeActive = false OR UPPER(sc.status) = 'ACTIVE') " +
             "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)")
     Page<Product> searchProducts(
             @Param("supplierCompanyId") Long supplierCompanyId,
@@ -56,6 +59,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("categoryStatus") String categoryStatus,
             @Param("pattern") String pattern,
             @Param("listableOnly") boolean listableOnly,
+            @Param("supplierCompanyMustBeActive") boolean supplierCompanyMustBeActive,
             Pageable pageable
     );
 
@@ -78,17 +82,19 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * Returns up to pageSize + 1 Products; service trims and computes hasNext.
      */
     @Query(value = "SELECT p FROM Product p " +
-            "JOIN FETCH p.supplierCompany " +
+            "JOIN FETCH p.supplierCompany sc " +
             "JOIN FETCH p.category " +
             "WHERE p.isListable = true " +
-            "AND (:supplierCompanyId IS NULL OR p.supplierCompany.id = :supplierCompanyId) " +
+            "AND (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " +
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
+            "AND (:supplierCompanyMustBeActive = false OR UPPER(sc.status) = 'ACTIVE') " +
             "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
            countQuery = "SELECT 1")
     List<Product> searchProductSlice(
             @Param("supplierCompanyId") Long supplierCompanyId,
             @Param("categoryId") Long categoryId,
             @Param("pattern") String pattern,
+            @Param("supplierCompanyMustBeActive") boolean supplierCompanyMustBeActive,
             Pageable pageable
     );
 
@@ -102,9 +108,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query(value = """
             SELECT p.id FROM products p
             JOIN categories c ON c.id = p.category_id
+            JOIN companies sc ON sc.id = p.supplier_company_id
             WHERE p.is_listable = true
               AND (:supplierCompanyId IS NULL OR p.supplier_company_id = :supplierCompanyId)
               AND (:categoryId IS NULL OR p.category_id = :categoryId)
+              AND (:supplierCompanyMustBeActive = false OR upper(sc.status) = 'ACTIVE')
               AND (cast(:keyword as text) IS NULL
                    OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
             ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('vn_simple', :keyword)) DESC, p.id ASC
@@ -115,6 +123,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("supplierCompanyId") Long supplierCompanyId,
             @Param("categoryId") Long categoryId,
             @Param("keyword") String keyword,
+            @Param("supplierCompanyMustBeActive") boolean supplierCompanyMustBeActive,
             Pageable pageable
     );
 
@@ -147,10 +156,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query(value = """
             SELECT p.id FROM products p
             JOIN categories c ON c.id = p.category_id
+            JOIN companies sc ON sc.id = p.supplier_company_id
             WHERE (:supplierCompanyId IS NULL OR p.supplier_company_id = :supplierCompanyId)
               AND (:categoryId IS NULL OR p.category_id = :categoryId)
               AND (cast(:status as text) IS NULL OR upper(p.status) = :status)
               AND (cast(:categoryStatus as text) IS NULL OR upper(c.status) = :categoryStatus)
+              AND (:supplierCompanyMustBeActive = false OR upper(sc.status) = 'ACTIVE')
               AND (cast(:keyword as text) IS NULL
                    OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
               AND (:requireHasPrices = false OR p.is_listable = true)
@@ -159,10 +170,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
            countQuery = """
             SELECT count(p.id) FROM products p
             JOIN categories c ON c.id = p.category_id
+            JOIN companies sc ON sc.id = p.supplier_company_id
             WHERE (:supplierCompanyId IS NULL OR p.supplier_company_id = :supplierCompanyId)
               AND (:categoryId IS NULL OR p.category_id = :categoryId)
               AND (cast(:status as text) IS NULL OR upper(p.status) = :status)
               AND (cast(:categoryStatus as text) IS NULL OR upper(c.status) = :categoryStatus)
+              AND (:supplierCompanyMustBeActive = false OR upper(sc.status) = 'ACTIVE')
               AND (cast(:keyword as text) IS NULL
                    OR p.search_vector @@ websearch_to_tsquery('vn_simple', :keyword))
               AND (:requireHasPrices = false OR p.is_listable = true)
@@ -175,6 +188,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("categoryStatus") String categoryStatus,
             @Param("keyword") String keyword,
             @Param("requireHasPrices") boolean requireHasPrices,
+            @Param("supplierCompanyMustBeActive") boolean supplierCompanyMustBeActive,
             Pageable pageable
     );
 

@@ -203,6 +203,12 @@ public class ProductServiceImpl implements ProductService {
         //   The DB keeps `is_listable` in sync via triggers (V20 migration).
         boolean listableOnly = isBuyer;
 
+        // Tier 2: also require supplier_company.status='ACTIVE' for BUYER.
+        //   If a supplier is INACTIVE, its products must not be discoverable
+        //   (BUYER cannot place an order against an inactive supplier per
+        //   CheckoutService). Admin/Supplier always see all rows.
+        boolean supplierCompanyMustBeActive = isBuyer;
+
         // Keyword is the trigger that switches between LIKE (small data, low cost)
         // and FTS (1M scale, GIN index). Trim once here so both paths share the
         // exact same input. Empty / blank keyword -> null = no search applied.
@@ -233,6 +239,7 @@ public class ProductServiceImpl implements ProductService {
                     categoryStatus,
                     keyword,
                     isBuyer,
+                    supplierCompanyMustBeActive,
                     ftsPageable
             );
             ids = idPage.getContent();
@@ -245,6 +252,7 @@ public class ProductServiceImpl implements ProductService {
                     categoryStatus,
                     null,
                     listableOnly,
+                    supplierCompanyMustBeActive,
                     pageable
             );
             ids = productPage.getContent().stream().map(Product::getId).toList();
@@ -301,6 +309,7 @@ public class ProductServiceImpl implements ProductService {
                     supplierCompanyId,
                     categoryId,
                     keyword,
+                    true,   // supplierCompanyMustBeActive: getProductsSlice is BUYER-only (checked above)
                     slicePageableNoSort
             );
             ids = trimToPageSize(rawIds, pageable.getPageSize());
@@ -310,6 +319,7 @@ public class ProductServiceImpl implements ProductService {
                     supplierCompanyId,
                     categoryId,
                     pattern,
+                    true,   // supplierCompanyMustBeActive: getProductsSlice is BUYER-only (checked above)
                     slicePageable
             );
             ids = rawProducts.stream().map(Product::getId).toList();
@@ -457,8 +467,11 @@ public class ProductServiceImpl implements ProductService {
 
         if (isBuyer) {
             // Buyer only sees ACTIVE product whose category is also ACTIVE
-            // Return 404 to avoid leaking existence
-            if (!"ACTIVE".equalsIgnoreCase(product.getStatus()) || !"ACTIVE".equalsIgnoreCase(product.getCategory().getStatus())) {
+            // and whose supplier company is ACTIVE.
+            // Return 404 to avoid leaking existence.
+            if (!"ACTIVE".equalsIgnoreCase(product.getStatus())
+                    || !"ACTIVE".equalsIgnoreCase(product.getCategory().getStatus())
+                    || !"ACTIVE".equalsIgnoreCase(product.getSupplierCompany().getStatus())) {
                 throw new ResourceNotFoundException("Product", "id", id);
             }
             // Buyer also requires the product to have at least one price_product

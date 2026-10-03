@@ -20,6 +20,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT u FROM User u JOIN FETCH u.role WHERE u.username = :identifier OR u.email = :identifier")
     Optional<User> findByUsernameOrEmail(@Param("identifier") String identifier);
 
+    /**
+     * Same as {@link #findByUsernameOrEmail} but also JOIN FETCH the Company
+     * so the Security layer can check {@code company.status} on every login
+     * and every JWT-authenticated request.
+     *
+     * <p>Used by {@code CustomUserDetailsService} to back-fill {@code companyId}
+     * and {@code companyStatus} into {@code UserPrincipal}. ADMIN users may have
+     * a {@code null} company, hence {@code LEFT JOIN FETCH}.
+     */
+    @Query("SELECT u FROM User u " +
+           "JOIN FETCH u.role " +
+           "LEFT JOIN FETCH u.company " +
+           "WHERE u.username = :identifier OR u.email = :identifier")
+    Optional<User> findByUsernameOrEmailWithCompany(@Param("identifier") String identifier);
+
     @Query("SELECT u FROM User u JOIN FETCH u.role LEFT JOIN FETCH u.company WHERE u.email = :email")
     Optional<User> findByEmailWithRoleAndCompany(@Param("email") String email);
 
