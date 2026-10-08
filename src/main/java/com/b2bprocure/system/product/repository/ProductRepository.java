@@ -45,7 +45,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
            countQuery = "SELECT count(*) FROM Product p " +
             "JOIN p.supplierCompany sc " +
-            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " + in countQuery)
+            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " +
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
