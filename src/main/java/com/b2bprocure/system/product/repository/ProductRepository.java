@@ -43,9 +43,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "AND (:listableOnly = false OR p.isListable = true) " +
             "AND (:supplierCompanyMustBeActive = false OR UPPER(sc.status) = 'ACTIVE') " +
             "AND (cast(:pattern as string) IS NULL OR LOWER(p.name) LIKE :pattern OR LOWER(p.sku) LIKE :pattern OR LOWER(p.description) LIKE :pattern)",
-           countQuery = "SELECT count(p) FROM Product p " +
+           countQuery = "SELECT count(*) FROM Product p " +
             "JOIN p.supplierCompany sc " +
-            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " +
+            "WHERE (:supplierCompanyId IS NULL OR sc.id = :supplierCompanyId) " + in countQuery)
             "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
             "AND (cast(:status as string) IS NULL OR UPPER(p.status) = :status) " +
             "AND (cast(:categoryStatus as string) IS NULL OR UPPER(p.category.status) = :categoryStatus) " +
@@ -168,7 +168,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('vn_simple', :keyword)) DESC, p.id ASC
             """,
            countQuery = """
-            SELECT count(p.id) FROM products p
+            SELECT count(*) FROM products p
             JOIN categories c ON c.id = p.category_id
             JOIN companies sc ON sc.id = p.supplier_company_id
             WHERE (:supplierCompanyId IS NULL OR p.supplier_company_id = :supplierCompanyId)
